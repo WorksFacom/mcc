@@ -39,3 +39,12 @@ typedef enum {
 } TokenType;
 
 
+
+typedef struct {
+    
+    TokenType tipo;
+    char lexema[50]; 
+
+} Token;
+
+

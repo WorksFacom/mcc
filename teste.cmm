@@ -1,7 +1,44 @@
-int main() {
-    
-    // testando comentario
+/* 
 
+teste test testeee
+
+ */
+
+
+
+int main() {
     int x = 10;
+    char c = 'a';
+    if (x < 5) {
+
+
+        x = x + 3;
+
+
+    } else {
+
+        x = x - 2;
+    }
+    
+    for (x = 0; x > -1; x = x * 2) {
+
+        return x % 3;
+    }
+    
+    x = x / 4;
+    
+    if (x == 10 && c != 'b') {
+        
+        x = x <= 5 || x >= 7;
+    }
+    
+    int array[10];
+    array[0] = 357;
+    
     return 0;
 }
+
+
+
+
+//testando comentario fdnf fdnfdn 223r44/-/z-*---
