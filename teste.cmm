@@ -4,7 +4,7 @@ teste test testeee
 
  */
 
-
+@
 
 int main() {
     int x = 10;
@@ -24,7 +24,7 @@ int main() {
 
         return x % 3;
     }
-    
+
     x = x / 4;
     
     if (x == 10 && c != 'b') {
@@ -34,6 +34,8 @@ int main() {
     
     int array[10];
     array[0] = 357;
+
+    char string = "hello"; 
     
     return 0;
 }

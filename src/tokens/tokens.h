@@ -4,7 +4,8 @@ typedef enum {
     UNDEF,              // token indefinido
     ID,                 // identificador
     INTEGERCONST,       // constante inteira 
-    CHARCONST,          // constante de caractere 
+    CHARCONST,          // constante de caractere
+    STRINGCONST,        // string de caracteres
     PLUS,               // operador +
     MINUS,              // operador -
     MUL,                // operador *
@@ -43,7 +44,8 @@ typedef enum {
 typedef struct {
     
     TokenType tipo;
-    char lexema[50]; 
+    char lexema[50];
+    int linha;
 
 } Token;
 

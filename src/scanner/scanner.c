@@ -4,6 +4,7 @@
 #include "string.h"
 
 FILE *arquivo_fonte;
+int linha_atual = 1;
 
 char prox_char(){
     return fgetc(arquivo_fonte);
@@ -15,12 +16,15 @@ int inicializar_scanner(const char *nome_arquivo) {
         printf("erro ao abrir o arquivo %s\n",nome_arquivo);
         return -1;
     }
+    linha_atual = 1;
     return 0; 
 }
 
 char ignora(char c) {
     while(c != EOF) {
         while (isspace(c) && c!=EOF) {
+            if (c == '\n') 
+                linha_atual++;
             c = prox_char();
         }
     if(c == '/'){
@@ -29,8 +33,10 @@ char ignora(char c) {
 
             while(c != '\n' && c!=EOF)
                 c = prox_char();
-            if(c== '\n')
+            if(c== '\n'){
+                linha_atual++;
                 c = prox_char();
+                }
             }
             else if(c == '*') {
 
@@ -43,6 +49,8 @@ char ignora(char c) {
                             break;
                         }
                     } else {
+                        if (c == '\n') 
+                            linha_atual++;
                         c = prox_char();
                     }
                 }
@@ -63,7 +71,8 @@ Token proximo_token() {
     token.tipo = UNDEF;
     token.lexema[0] = '\0';
 
-    char c = ignora(prox_char());  //ignora espaços e comentario
+    char c = ignora(prox_char());  
+    token.linha = linha_atual;
 
     if (c == EOF) {
         token.tipo = END_OF_FILE;
@@ -261,13 +270,38 @@ Token proximo_token() {
         return token;
     }
 
+    
+        //reconhcer strings
+        if (c == '"') {
+            char buffer[100]; 
+            int i = 0;
+            buffer[i++] = c; 
+            c = prox_char();
+            while (c != '"' && c != EOF && i < 99) { 
+                buffer[i++] = c;
+                c = prox_char();
+            }
+            if (c == '"') {
+                buffer[i++] = c;
+                buffer[i] = '\0';
+                token.tipo = STRINGCONST;
+                strcpy(token.lexema, buffer);
+                return token;
+            }
+            
+            ungetc(c, arquivo_fonte);
+            token.tipo = UNDEF;
+            strcpy(token.lexema, "\"");
+            return token;
+        }
+
     //reconhecer numeros inteiro
     if (isdigit(c) || c == '-') {
-        char buffer[50]; 
+        char buffer[10]; 
         int i = 0; 
         buffer[i++] = c;
         c = prox_char(); 
-        while (isdigit(c) && i < 49) { 
+        while (isdigit(c) && i < 9) { 
             buffer[i++] = c; 
             c = prox_char(); 
         }
