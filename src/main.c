@@ -1,7 +1,21 @@
+/** @file main.c
+ *  @brief Programa principal do compilador da linguagem Simple C.
+ *
+ *  Este arquivo contém a função principal que inicializa o analisador léxico,
+ *  lê o arquivo fonte, e gera a lista de tokens em um arquivo de saída.
+ */
+
 #include <stdio.h>
 #include "scanner/scanner.h"
 
-
+/** @brief Função principal do compilador Simple C.
+ *
+ *  Verifica argumentos, inicializa o analisador léxico, imprime o codigo fonte,
+ *  e gera tokens no arquivo tokens.txt. Interrompe se encontrar um token indefinido.
+ *  @param argc número de argumentos da linha de comando.
+ *  @param argv vetor de strings com os argumentos.
+ *  @return 0 em caso de sucesso, -1 se houver erro (ex.: arquivo inválido ou token indefinido).
+ */
 int main(int argc, char *argv[]) {
     if (argc < 2) {
     printf("arquivo nao encontrado\n");
@@ -19,7 +33,6 @@ int main(int argc, char *argv[]) {
         putchar(c);
         c = prox_char();
     }
-    printf("\n");
 
 
     FILE *saida = fopen("tokens.txt", "w");
@@ -44,10 +57,10 @@ int main(int argc, char *argv[]) {
             return -1; 
         }
 
-        fprintf(saida, "Token: tipo = %d, lexema = '%s'\n", token.tipo, token.lexema);//imprimir todos os tokens
+        fprintf(saida, "Token: tipo = %d, lexema = '%s', linha = %d\n", token.tipo, token.lexema,token.linha);//imprimir todos os tokens
         token = proximo_token();
     }
-    fprintf(saida, "Token: tipo = %d, lexema = '%s'\n", token.tipo, token.lexema);//imprimir o EOF
+    fprintf(saida, "Token: tipo = %d, lexema = '%s', linha = %d\n", token.tipo, token.lexema,token.linha);//imprimir o EOF
 
     printf("\n");
     fclose(saida);

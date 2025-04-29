@@ -1,15 +1,42 @@
+/** @file scanner.c
+ *  @brief Implementação do analisador léxico para a linguagem Simple C.
+ *  
+ *  Este arquivo contém as funções para ler o arquivo fonte, ignorar espaços e comentários,
+ *  e gerar tokens a partir de um arquivo de entrada. O analisador léxico é a primeira
+ *  etapa do compilador, convertendo o código em uma sequência de tokens.
+ */
+
+
 #include <stdio.h>
 #include <ctype.h>
 #include "scanner.h"
 #include "string.h"
 
+/** @brief Arquivo de entrada do arquivo fonte.
+ *  
+ *  Ponteiro para o arquivo aberto que contém o código Simple C a ser analisado.
+ */
 FILE *arquivo_fonte;
+/** @brief Contador da linha atual no arquivo fonte.
+ *  
+ *  Rastreia a linha atual para relatar erros com precisão, inicializado em 1.
+ */
 int linha_atual = 1;
 
+/** @brief Lê o próximo caractere do arquivo de entrada.
+ *  
+ *  @return O caractere lido ou EOF se o fim do arquivo for atingido.
+ */
 char prox_char(){
     return fgetc(arquivo_fonte);
 }
 
+/** @brief Inicializa o analisador léxico com o arquivo de entrada.
+ *  
+ *  Abre o arquivo especificado e prepara o analisador para leitura.
+ *  @param teste Nome do arquivo cmm a ser analisado.
+ *  @return 0 em caso de sucesso, -1 se houver erro ao abrir o arquivo.
+ */
 int inicializar_scanner(const char *nome_arquivo) {
     arquivo_fonte=fopen(nome_arquivo,"r");
     if(arquivo_fonte == NULL){
@@ -20,6 +47,13 @@ int inicializar_scanner(const char *nome_arquivo) {
     return 0; 
 }
 
+/** @brief Ignora espaços em branco e comentários no código-fonte.
+ *  
+ *  Avança a leitura até encontrar um caractere significativo, pulando espaços,
+ *  quebras de linha e comentários Atualiza a linha atual.
+ *  @param c Caractere inicial a ser processado.
+ *  @return Próximo caractere significativo ou EOF se o fim do arquivo for atingido.
+ */
 char ignora(char c) {
     while(c != EOF) {
         while (isspace(c) && c!=EOF) {
@@ -65,7 +99,13 @@ char ignora(char c) {
     return c;  
 }
 
-
+/** @brief Gera o próximo token do arquivo fonte.
+ *  
+ *  Lê caracteres do arquivo, ignora espaços e comentários, e identifica o próximo
+ *  token (ex.: identificadores, operadores, palavras reservadas). Define o tipo,
+ *  lexema e linha do token.
+ *  @return Estrutura Token contendo tipo, lexema e linha do token identificado.
+ */
 Token proximo_token() {
     Token token; 
     token.tipo = UNDEF;

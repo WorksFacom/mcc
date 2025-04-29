@@ -1,5 +1,15 @@
+/** @file tokens.h
+ *  @brief Definições de tipos de tokens e estrutura de token para a linguagem Simple C.
+ *
+ *  Este arquivo define a enumeração dos tipos de tokens reconhecidos pelo analisador léxico
+ *  e a estrutura que armazena informações sobre cada token gerado.
+ */
 
-
+ /** @brief Enumeração dos tipos de tokens da linguagem Simple C.
+ *
+ *  Define todos os tipos de tokens que o analisador léxico pode gerar, incluindo
+ *  operadores, palavras reservadas, constantes e símbolos especiais.
+ */
 typedef enum {
     UNDEF,              // token indefinido
     ID,                 // identificador
@@ -40,11 +50,14 @@ typedef enum {
 } TokenType;
 
 
-
+/** @brief Estrutura que representa um token gerado pelo analisador léxico.
+ *
+ *  Armazena o tipo do token, o lexema e a linha onde foi encontrado.
+ */
 typedef struct {
-    
+    /** @brief Tipo do token, conforme definido em TokenType. */
     TokenType tipo;
-    char lexema[50];
+    char lexema[100];
     int linha;
 
 } Token;
