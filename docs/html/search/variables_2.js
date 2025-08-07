@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['tipo_0',['tipo',['../struct_token.html#a571b3be5225105caedc9bcebb5a06121',1,'Token']]]
+  ['data_0',['data',['../struct_a_s_t_node.html#a726b9bfd4ccad9d7a898f748082ed83d',1,'ASTNode']]]
 ];

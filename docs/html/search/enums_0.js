@@ -1,4 +1,4 @@
 var searchData=
 [
-  ['tokentype_0',['TokenType',['../tokens_8h.html#aa520fbf142ba1e7e659590c07da31921',1,'tokens.h']]]
+  ['nodetype_0',['NodeType',['../ast_8h.html#acac9cbaeea226ed297804c012dc12b16',1,'ast.h']]]
 ];

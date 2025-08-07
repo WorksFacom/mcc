@@ -1,3 +1,7 @@
+#ifndef TOKENS_H
+#define TOKENS_H
+
+
 /** @file tokens.h
  *  @brief Definições de tipos de tokens e estrutura de token para a linguagem Simple C.
  *
@@ -61,5 +65,5 @@ typedef struct {
     int linha;
 
 } Token;
-
+#endif
 

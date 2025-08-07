@@ -109,68 +109,35 @@ $(function(){initNavTree('scanner_8c.html',''); initResizable(true); });
 </div><!--header-->
 <div class="contents">
 
-<p>Implementação do analisador léxico para a linguagem Simple C.  
+<p>implementação do analisador léxico para a linguagem simple c.  
 <a href="#details">More...</a></p>
 <div class="textblock"><code>#include &lt;stdio.h&gt;</code><br />
 <code>#include &lt;ctype.h&gt;</code><br />
+<code>#include &lt;string.h&gt;</code><br />
 <code>#include &quot;<a class="el" href="scanner_8h_source.html">scanner.h</a>&quot;</code><br />
-<code>#include &quot;string.h&quot;</code><br />
 </div><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="func-members" name="func-members"></a>
 Functions</h2></td></tr>
-<tr class="memitem:a219b21f24a622d6d10ac454b36424b47" id="r_a219b21f24a622d6d10ac454b36424b47"><td class="memItemLeft" align="right" valign="top">char&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a219b21f24a622d6d10ac454b36424b47">prox_char</a> ()</td></tr>
-<tr class="memdesc:a219b21f24a622d6d10ac454b36424b47"><td class="mdescLeft">&#160;</td><td class="mdescRight">Lê o próximo caractere do arquivo de entrada.  <br /></td></tr>
-<tr class="separator:a219b21f24a622d6d10ac454b36424b47"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a738249caee98d0855487eb39dd130878" id="r_a738249caee98d0855487eb39dd130878"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a738249caee98d0855487eb39dd130878">inicializar_scanner</a> (const char *nome_arquivo)</td></tr>
-<tr class="memdesc:a738249caee98d0855487eb39dd130878"><td class="mdescLeft">&#160;</td><td class="mdescRight">Inicializa o analisador léxico com o arquivo de entrada.  <br /></td></tr>
+<tr class="memdesc:a738249caee98d0855487eb39dd130878"><td class="mdescLeft">&#160;</td><td class="mdescRight">inicializa o analisador léxico com o arquivo de entrada.  <br /></td></tr>
 <tr class="separator:a738249caee98d0855487eb39dd130878"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a9388074d05c1eb4c10fdbe457a42898d" id="r_a9388074d05c1eb4c10fdbe457a42898d"><td class="memItemLeft" align="right" valign="top">char&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a9388074d05c1eb4c10fdbe457a42898d">ignora</a> (char c)</td></tr>
-<tr class="memdesc:a9388074d05c1eb4c10fdbe457a42898d"><td class="mdescLeft">&#160;</td><td class="mdescRight">Ignora espaços em branco e comentários no código-fonte.  <br /></td></tr>
-<tr class="separator:a9388074d05c1eb4c10fdbe457a42898d"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a94863ad811d4f023349eacfb40d86617" id="r_a94863ad811d4f023349eacfb40d86617"><td class="memItemLeft" align="right" valign="top"><a class="el" href="struct_token.html">Token</a>&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a94863ad811d4f023349eacfb40d86617">proximo_token</a> ()</td></tr>
-<tr class="memdesc:a94863ad811d4f023349eacfb40d86617"><td class="mdescLeft">&#160;</td><td class="mdescRight">Gera o próximo token do arquivo fonte.  <br /></td></tr>
+<tr class="memdesc:a94863ad811d4f023349eacfb40d86617"><td class="mdescLeft">&#160;</td><td class="mdescRight">gera o próximo token do arquivo fonte.  <br /></td></tr>
 <tr class="separator:a94863ad811d4f023349eacfb40d86617"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table><table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="var-members" name="var-members"></a>
 Variables</h2></td></tr>
 <tr class="memitem:a5c91fc740d6df09e06eea8cc05b51bce" id="r_a5c91fc740d6df09e06eea8cc05b51bce"><td class="memItemLeft" align="right" valign="top">FILE *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a5c91fc740d6df09e06eea8cc05b51bce">arquivo_fonte</a></td></tr>
-<tr class="memdesc:a5c91fc740d6df09e06eea8cc05b51bce"><td class="mdescLeft">&#160;</td><td class="mdescRight">Arquivo de entrada do arquivo fonte.  <br /></td></tr>
+<tr class="memdesc:a5c91fc740d6df09e06eea8cc05b51bce"><td class="mdescLeft">&#160;</td><td class="mdescRight">arquivo de entrada do arquivo fonte.  <br /></td></tr>
 <tr class="separator:a5c91fc740d6df09e06eea8cc05b51bce"><td class="memSeparator" colspan="2">&#160;</td></tr>
 <tr class="memitem:a48460171caffd3cd1bbcaa07a2c3b669" id="r_a48460171caffd3cd1bbcaa07a2c3b669"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a48460171caffd3cd1bbcaa07a2c3b669">linha_atual</a> = 1</td></tr>
-<tr class="memdesc:a48460171caffd3cd1bbcaa07a2c3b669"><td class="mdescLeft">&#160;</td><td class="mdescRight">Contador da linha atual no arquivo fonte.  <br /></td></tr>
+<tr class="memdesc:a48460171caffd3cd1bbcaa07a2c3b669"><td class="mdescLeft">&#160;</td><td class="mdescRight">contador da linha atual no arquivo fonte.  <br /></td></tr>
 <tr class="separator:a48460171caffd3cd1bbcaa07a2c3b669"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
 <a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
-<div class="textblock"><p>Implementação do analisador léxico para a linguagem Simple C. </p>
-<p>Este arquivo contém as funções para ler o arquivo fonte, ignorar espaços e comentários, e gerar tokens a partir de um arquivo de entrada. O analisador léxico é a primeira etapa do compilador, convertendo o código em uma sequência de tokens. </p>
+<div class="textblock"><p>implementação do analisador léxico para a linguagem simple c. </p>
+<p>este arquivo contém as funções para ler o arquivo fonte, ignorar espaços e comentários, e gerar tokens a partir de um arquivo de entrada. o analisador léxico é a primeira etapa do compilador, convertendo o código em uma sequência de tokens. </p>
 </div><h2 class="groupheader">Function Documentation</h2>
-<a id="a9388074d05c1eb4c10fdbe457a42898d" name="a9388074d05c1eb4c10fdbe457a42898d"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a9388074d05c1eb4c10fdbe457a42898d">&#9670;&#160;</a></span>ignora()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">char ignora </td>
-          <td>(</td>
-          <td class="paramtype">char</td>          <td class="paramname"><span class="paramname"><em>c</em></span></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-<p>Ignora espaços em branco e comentários no código-fonte. </p>
-<p>Ignora espaços em branco e comentários no arquivo fonte.</p>
-<p>Avança a leitura até encontrar um caractere significativo, pulando espaços, quebras de linha e comentários Atualiza a linha atual. </p><dl class="params"><dt>Parameters</dt><dd>
-  <table class="params">
-    <tr><td class="paramname">c</td><td>Caractere inicial a ser processado. </td></tr>
-  </table>
-  </dd>
-</dl>
-<dl class="section return"><dt>Returns</dt><dd>Próximo caractere significativo ou EOF se o fim do arquivo for atingido. </dd></dl>
-
-</div>
-</div>
 <a id="a738249caee98d0855487eb39dd130878" name="a738249caee98d0855487eb39dd130878"></a>
 <h2 class="memtitle"><span class="permalink"><a href="#a738249caee98d0855487eb39dd130878">&#9670;&#160;</a></span>inicializar_scanner()</h2>
 
@@ -186,34 +153,14 @@ Variables</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Inicializa o analisador léxico com o arquivo de entrada. </p>
-<p>Abre o arquivo especificado e prepara o analisador para leitura. </p><dl class="params"><dt>Parameters</dt><dd>
+<p>inicializa o analisador léxico com o arquivo de entrada. </p>
+<p>abre o arquivo especificado e prepara o analisador para leitura. </p><dl class="params"><dt>Parameters</dt><dd>
   <table class="params">
-    <tr><td class="paramname">teste</td><td>Nome do arquivo cmm a ser analisado. </td></tr>
+    <tr><td class="paramname">nome_arquivo</td><td>nome do arquivo a ser analisado. </td></tr>
   </table>
   </dd>
 </dl>
 <dl class="section return"><dt>Returns</dt><dd>0 em caso de sucesso, -1 se houver erro ao abrir o arquivo. </dd></dl>
-
-</div>
-</div>
-<a id="a219b21f24a622d6d10ac454b36424b47" name="a219b21f24a622d6d10ac454b36424b47"></a>
-<h2 class="memtitle"><span class="permalink"><a href="#a219b21f24a622d6d10ac454b36424b47">&#9670;&#160;</a></span>prox_char()</h2>
-
-<div class="memitem">
-<div class="memproto">
-      <table class="memname">
-        <tr>
-          <td class="memname">char prox_char </td>
-          <td>(</td>
-          <td class="paramname"><span class="paramname"><em></em></span></td><td>)</td>
-          <td></td>
-        </tr>
-      </table>
-</div><div class="memdoc">
-
-<p>Lê o próximo caractere do arquivo de entrada. </p>
-<dl class="section return"><dt>Returns</dt><dd>O caractere lido ou EOF se o fim do arquivo for atingido. </dd></dl>
 
 </div>
 </div>
@@ -232,8 +179,8 @@ Variables</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Gera o próximo token do arquivo fonte. </p>
-<p>Lê caracteres do arquivo, ignora espaços e comentários, e identifica o próximo token (ex.: identificadores, operadores, palavras reservadas). Define o tipo, lexema e linha do token. </p><dl class="section return"><dt>Returns</dt><dd>Estrutura <a class="el" href="struct_token.html" title="Estrutura que representa um token gerado pelo analisador léxico.">Token</a> contendo tipo, lexema e linha do token identificado. </dd></dl>
+<p>gera o próximo token do arquivo fonte. </p>
+<p>lê caracteres do arquivo, ignora espaços e comentários, e identifica o próximo token (ex.: identificadores, operadores, palavras reservadas). </p><dl class="section return"><dt>Returns</dt><dd>estrutura token contendo tipo, lexema e linha do token identificado. </dd></dl>
 
 </div>
 </div>
@@ -250,8 +197,8 @@ Variables</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Arquivo de entrada do arquivo fonte. </p>
-<p>Ponteiro para o arquivo aberto que contém o código Simple C a ser analisado. </p>
+<p>arquivo de entrada do arquivo fonte. </p>
+<p>ponteiro para o arquivo aberto que contém o código simple c a ser analisado. </p>
 
 </div>
 </div>
@@ -267,8 +214,8 @@ Variables</h2></td></tr>
       </table>
 </div><div class="memdoc">
 
-<p>Contador da linha atual no arquivo fonte. </p>
-<p>Rastreia a linha atual para relatar erros com precisão, inicializado em 1. </p>
+<p>contador da linha atual no arquivo fonte. </p>
+<p>rastreia a linha atual para relatar erros com precisão, inicializado em 1. </p>
 
 </div>
 </div>

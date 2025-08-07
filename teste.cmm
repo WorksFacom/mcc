@@ -1,51 +1,7 @@
-/* 
-
-teste test testeee
-
- */
-
-
-
+// Arquivo: teste_sucesso_array1.cmm
 int main() {
-    int x = 10;
-    char c = 'a';
-    if (x < 5) {
-
-
-        x = x + 3;
-
-
-    } else {
-
-        x = x - 2;
-    }
-    
-    for (x = 0; x > -1; x = x * 2) {
-
-        return x % 3;
-    }
-
-    if (x == 10 || c != 'b') {
-        
-        x = x;
-    }
-    
-    x = x / 4;
-    
-    if (x == 10 && c != 'b') {
-        
-        x = 7;
-    }
-    
-    int array[10];
-    array[0] = 357;
-
-    char string = "hello"; 
-    
+    int v[10];
+    v[4] = 47;
+    v[5] = v[9]; // Acesso e atribuição válidos
     return 0;
 }
-
-
-
-
-//testando comentario fdnf fdnfdn 223r44/-/z-*---

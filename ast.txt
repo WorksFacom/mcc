@@ -1,0 +1,23 @@
+NO_PROGRAMA
+  NO_DEFINICAO_FUNCAO
+    NO_TIPO (INT)
+    NO_ID (Nome: main)
+    NO_BLOCO
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (INT)
+        NO_ID (Nome: v)
+        NO_CONST_INT (Valor: 10)
+      NO_ATRIBUICAO
+        NO_ACESSO_ARRAY
+          NO_ID (Nome: v)
+          NO_CONST_INT (Valor: 4)
+        NO_CONST_INT (Valor: 47)
+      NO_ATRIBUICAO
+        NO_ACESSO_ARRAY
+          NO_ID (Nome: v)
+          NO_CONST_INT (Valor: 5)
+        NO_ACESSO_ARRAY
+          NO_ID (Nome: v)
+          NO_CONST_INT (Valor: 9)
+      NO_RETORNO
+        NO_CONST_INT (Valor: 0)

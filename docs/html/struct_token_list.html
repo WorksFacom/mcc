@@ -103,23 +103,80 @@ $(function(){initNavTree('struct_token_list.html',''); initResizable(true); });
 
 <div class="header">
   <div class="summary">
-<a href="#pub-attribs">Data Fields</a>  </div>
+<a href="#pub-attribs">Public Attributes</a> &#124;
+<a href="struct_token_list-members.html">List of all members</a>  </div>
   <div class="headertitle"><div class="title">TokenList Struct Reference</div></div>
 </div><!--header-->
 <div class="contents">
+
+<p>estrutura para armazenar dinamicamente a lista de tokens lida do scanner.  
+ <a href="#details">More...</a></p>
+
+<p><code>#include &lt;<a class="el" href="parser_8h_source.html">parser.h</a>&gt;</code></p>
 <table class="memberdecls">
 <tr class="heading"><td colspan="2"><h2 class="groupheader"><a id="pub-attribs" name="pub-attribs"></a>
-Data Fields</h2></td></tr>
-<tr class="memitem:a3416f416bac85409f9c83d25a43fe911" id="r_a3416f416bac85409f9c83d25a43fe911"><td class="memItemLeft" align="right" valign="top"><a id="a3416f416bac85409f9c83d25a43fe911" name="a3416f416bac85409f9c83d25a43fe911"></a>
-<a class="el" href="struct_token.html">Token</a> *&#160;</td><td class="memItemRight" valign="bottom"><b>tokens</b></td></tr>
+Public Attributes</h2></td></tr>
+<tr class="memitem:a3416f416bac85409f9c83d25a43fe911" id="r_a3416f416bac85409f9c83d25a43fe911"><td class="memItemLeft" align="right" valign="top"><a class="el" href="struct_token.html">Token</a> *&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a3416f416bac85409f9c83d25a43fe911">tokens</a></td></tr>
+<tr class="memdesc:a3416f416bac85409f9c83d25a43fe911"><td class="mdescLeft">&#160;</td><td class="mdescRight">ponteiro para o array de tokens.  <br /></td></tr>
 <tr class="separator:a3416f416bac85409f9c83d25a43fe911"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:a8d3ec92fdaa67cd76113af87c7bcf2fe" id="r_a8d3ec92fdaa67cd76113af87c7bcf2fe"><td class="memItemLeft" align="right" valign="top"><a id="a8d3ec92fdaa67cd76113af87c7bcf2fe" name="a8d3ec92fdaa67cd76113af87c7bcf2fe"></a>
-int&#160;</td><td class="memItemRight" valign="bottom"><b>tamanho</b></td></tr>
+<tr class="memitem:a8d3ec92fdaa67cd76113af87c7bcf2fe" id="r_a8d3ec92fdaa67cd76113af87c7bcf2fe"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#a8d3ec92fdaa67cd76113af87c7bcf2fe">tamanho</a></td></tr>
+<tr class="memdesc:a8d3ec92fdaa67cd76113af87c7bcf2fe"><td class="mdescLeft">&#160;</td><td class="mdescRight">número atual de tokens na lista.  <br /></td></tr>
 <tr class="separator:a8d3ec92fdaa67cd76113af87c7bcf2fe"><td class="memSeparator" colspan="2">&#160;</td></tr>
-<tr class="memitem:af8991e64511e8ec2a2f5f609a24a6700" id="r_af8991e64511e8ec2a2f5f609a24a6700"><td class="memItemLeft" align="right" valign="top"><a id="af8991e64511e8ec2a2f5f609a24a6700" name="af8991e64511e8ec2a2f5f609a24a6700"></a>
-int&#160;</td><td class="memItemRight" valign="bottom"><b>capacidade</b></td></tr>
+<tr class="memitem:af8991e64511e8ec2a2f5f609a24a6700" id="r_af8991e64511e8ec2a2f5f609a24a6700"><td class="memItemLeft" align="right" valign="top">int&#160;</td><td class="memItemRight" valign="bottom"><a class="el" href="#af8991e64511e8ec2a2f5f609a24a6700">capacidade</a></td></tr>
+<tr class="memdesc:af8991e64511e8ec2a2f5f609a24a6700"><td class="mdescLeft">&#160;</td><td class="mdescRight">capacidade atual do array de tokens.  <br /></td></tr>
 <tr class="separator:af8991e64511e8ec2a2f5f609a24a6700"><td class="memSeparator" colspan="2">&#160;</td></tr>
 </table>
+<a name="details" id="details"></a><h2 class="groupheader">Detailed Description</h2>
+<div class="textblock"><p>estrutura para armazenar dinamicamente a lista de tokens lida do scanner. </p>
+</div><h2 class="groupheader">Member Data Documentation</h2>
+<a id="af8991e64511e8ec2a2f5f609a24a6700" name="af8991e64511e8ec2a2f5f609a24a6700"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#af8991e64511e8ec2a2f5f609a24a6700">&#9670;&#160;</a></span>capacidade</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int TokenList::capacidade</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>capacidade atual do array de tokens. </p>
+
+</div>
+</div>
+<a id="a8d3ec92fdaa67cd76113af87c7bcf2fe" name="a8d3ec92fdaa67cd76113af87c7bcf2fe"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a8d3ec92fdaa67cd76113af87c7bcf2fe">&#9670;&#160;</a></span>tamanho</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname">int TokenList::tamanho</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>número atual de tokens na lista. </p>
+
+</div>
+</div>
+<a id="a3416f416bac85409f9c83d25a43fe911" name="a3416f416bac85409f9c83d25a43fe911"></a>
+<h2 class="memtitle"><span class="permalink"><a href="#a3416f416bac85409f9c83d25a43fe911">&#9670;&#160;</a></span>tokens</h2>
+
+<div class="memitem">
+<div class="memproto">
+      <table class="memname">
+        <tr>
+          <td class="memname"><a class="el" href="struct_token.html">Token</a>* TokenList::tokens</td>
+        </tr>
+      </table>
+</div><div class="memdoc">
+
+<p>ponteiro para o array de tokens. </p>
+
+</div>
+</div>
 <hr/>The documentation for this struct was generated from the following file:<ul>
 <li>src/parser/<a class="el" href="parser_8h_source.html">parser.h</a></li>
 </ul>
