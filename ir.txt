@@ -1,22 +1,13 @@
 --- CODIGO INTERMEDIARIO (IR) ---
-soma:
-    t0 := a + b
-    resultado := t0
-    return resultado
 main:
-    x := 12
-    t1 := x < 20
-    if_false t1 goto L0
+    x := 100
+    t0 := x == 10
+    if_false t0 goto L0
     y := 1
     goto L1
 L0:
     y := 2
 L1:
-    param x
-    param y
-    t2 := call soma, 2
-    z := t2
-    abc := 80
-    print_char abc
+    print_int y
     return 0
 ---------------------------------
