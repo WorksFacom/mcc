@@ -5,7 +5,7 @@ CC = gcc
 CFLAGS = -g -Wall -Isrc/tokens -Isrc/scanner -Isrc/parser -Isrc/ast -Isrc/symbol_table -Isrc/semantic -Isrc/ir -Isrc/intercode -Isrc/assembly
 
 # Nome do executável final
-TARGET = compilador
+TARGET = mcc
 
 # Arquivo de entrada padrão para os testes
 # (Pode ser sobrescrito: make run INPUT=teste2.cmm)

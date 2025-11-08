@@ -86,3 +86,7 @@ dkms.conf
 *.out
 *.app
 
+# Compiled data
+ast.txt
+ir.txt
+tokens.txt
