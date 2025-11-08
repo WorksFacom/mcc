@@ -30,6 +30,7 @@ typedef enum {
     NODE_IF,                ///< representa uma estrutura condicional 'if-else'.
     NODE_FOR,               ///< representa um laço 'for'.
     NODE_RETURN,            ///< representa um comando 'return'.
+    NODE_PRINT,             ///< representa um comando 'print'.
     NODE_CALL,              ///< representa uma chamada de função.
     NODE_BINARY_OP,         ///< representa uma operação binária (ex: +, -, *, <, ==).
     NODE_UNARY_OP,          ///< representa uma operação unária (ex: -, !).

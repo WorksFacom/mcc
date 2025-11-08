@@ -25,6 +25,8 @@ typedef struct {
     int num_parametros;                     ///< armazena o número de parâmetros se for uma função.
     int is_array;                           ///< flag que indica se o símbolo é um array.
     int array_size;                         ///< armazena o tamanho se for um array.
+    int memory_offset;                      ///< o deslocamento (offset) do símbolo na pilha de execução.
+    int is_parameter;                       ///< flag que indica se o símbolo é um parâmetro.
 } Simbolo;
 
 /** @brief representa uma tabela de símbolos para um único escopo. */
@@ -53,7 +55,7 @@ void empilhar_tabela(PilhaTabelasSimbolos *pilha);
 void desempilhar_tabela(PilhaTabelasSimbolos *pilha);
 
 /** @brief adiciona um novo símbolo à tabela que está no topo da pilha. */
-int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size);
+int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size, int is_parameter);
 
 /** @brief busca por um símbolo apenas na tabela do escopo atual (topo da pilha). */
 Simbolo* buscar_simbolo_no_escopo_atual(PilhaTabelasSimbolos *pilha, const char *nome);

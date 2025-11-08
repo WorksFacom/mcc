@@ -109,7 +109,7 @@ void inicializar_parser(Parser *parser, TokenList *lista, PilhaTabelasSimbolos *
 /** @brief função principal que dispara a análise sintática. */
 ASTNode* parse(Parser *parser) {
     ASTNode* root = program(parser);
-    printf("Analise Sintatica concluida. AST gerada com sucesso.\n");
+    
     return root;
 }
 
@@ -388,6 +388,11 @@ ASTNode* statement(Parser *parser) {
         }
         case IF: return if_statement(parser);
         case FOR: return for_statement(parser);
+        case PRINT: {
+            ASTNode* print_node = print_statement(parser);
+            match(parser, SEMICOLON);
+            return print_node;
+        }
         case ID: {
             ASTNode* node = assign(parser);
             match(parser, SEMICOLON);
@@ -444,6 +449,21 @@ ASTNode* if_statement(Parser *parser) {
         adicionar_filho(if_node, statement(parser));
     }
     return if_node;
+}
+
+/** @brief processa uma instrução 'print'. */
+ASTNode* print_statement(Parser *parser) {
+    int line = parser->current_token->linha;
+    match(parser, PRINT);
+    
+    ASTNode* print_node = criar_no(NODE_PRINT, line);
+
+    match(parser, LPAREN);
+    //O filho do no PRINT é a expressão que será impressa.
+    adicionar_filho(print_node, expression(parser));
+    match(parser, RPAREN);
+
+    return print_node;
 }
 
 /** @brief processa uma instrução de laço 'for'. */

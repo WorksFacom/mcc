@@ -1,0 +1,12 @@
+// arquivo: teste_funcao.cmm
+int multiplicar(int a, int b) {
+    int resultado;
+    resultado = a * b;
+    return resultado;
+}
+
+int main() {
+    int valor = multiplicar(7, 6);
+    print(valor); // Deve imprimir 42
+    return 0;
+}

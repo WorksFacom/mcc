@@ -1,0 +1,13 @@
+// arquivo: teste_array.cmm
+int main() {
+    int v[10];
+    int indice = 3;
+    
+    v[0] = 50;
+    v[indice] = 100;
+    
+    int valor = v[indice] + v[0]; // 100 + 50
+    print(valor); // Deve imprimir 150
+    
+    return 0;
+}

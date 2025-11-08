@@ -1,0 +1,9 @@
+// arquivo: teste_char.cmm
+int main() {
+    char c = 'A';
+    print(c); // Deve imprimir 'A'
+    
+    c = 'B';
+    print(c); // Deve imprimir 'B'
+    return 0;
+}

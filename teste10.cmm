@@ -1,0 +1,17 @@
+
+
+int main() {
+    int v[5];
+    int i;
+    
+    print("Preenchendo array...");
+    for (i = 0; i < 5; i = i + 1) {
+        v[i] = i * 10;
+    }
+    
+    print("Imprimindo array:");
+    for (i = 0; i < 5; i = i + 1) {
+        print(v[i]);
+    }
+    return 0;
+}

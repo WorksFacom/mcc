@@ -117,5 +117,7 @@ ASTNode* for_statement(Parser *parser);
 ASTNode* param_list(Parser *parser);
 /** @brief processa a lista de argumentos em uma chamada de função. */
 ASTNode* arg_list(Parser *parser);
+/** @brief processa uma instrução 'print'. */
+ASTNode* print_statement(Parser *parser); 
 
 #endif //PARSER_H

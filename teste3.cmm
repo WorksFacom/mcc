@@ -1,0 +1,6 @@
+// arquivo: teste_string.cmm
+int main() {
+    print("Hello World!");
+    print("Compilador 100% funcional.");
+    return 0;
+}

@@ -1,0 +1,6 @@
+// arquivo: erro_lexico.cmm
+int main() {
+    int x = 10;
+    int y = x @ 5; // Erro! Caractere inválido.
+    return 0;
+}

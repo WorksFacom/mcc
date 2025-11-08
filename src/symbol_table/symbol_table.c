@@ -58,16 +58,16 @@ void empilhar_tabela(PilhaTabelasSimbolos *pilha) {
     pilha->tabelas[++pilha->topo] = nova_tabela;
 }
 
-/**
- * @brief desempilha a tabela de símbolos do topo, fechando o escopo atual.
- * @param pilha ponteiro para a pilha da qual a tabela será removida.
- */
+/** @brief desempilha a tabela de símbolos do topo, fechando o escopo atual. */
 void desempilhar_tabela(PilhaTabelasSimbolos *pilha) {
     if (pilha->topo < 0) {
         printf("Erro: Pilha de tabelas vazia\n");
         exit(EXIT_FAILURE);
     }
-    free(pilha->tabelas[pilha->topo--]);
+    
+    //NÃO libera a memória aqui. Apenas decrementa o ponteiro do topo.
+    //a limpeza de memória será feita por destruir_pilha_tabelas() no main.c
+    pilha->topo--;
 }
 
 /**
@@ -80,7 +80,7 @@ void desempilhar_tabela(PilhaTabelasSimbolos *pilha) {
  * @param array_size o tamanho do array (se aplicável).
  * @return 0 em caso de sucesso, -1 em caso de erro.
  */
-int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size) {
+int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size, int is_parameter) {
     if (pilha->topo < 0) {
         printf("Erro: Nenhuma tabela de símbolos disponível\n");
         return -1;
@@ -98,6 +98,9 @@ int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType t
     //salva as novas informações do array
     s->is_array = is_array;
     s->array_size = array_size;
+
+    s->is_parameter = is_parameter;
+    s->memory_offset = 0; //será calculado pelo semantic.c
     
     tabela->tamanho++;
     return 0;

@@ -50,6 +50,7 @@ typedef enum {
     RETURN,             // palavra reservada return
     INT,                // palavra reservada int
     CHAR,               // palavra reservada char
+    PRINT,              // palavra reservada print
     END_OF_FILE         // fim de arquivo
 } TokenType;
 

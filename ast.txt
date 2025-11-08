@@ -1,23 +1,67 @@
 NO_PROGRAMA
   NO_DEFINICAO_FUNCAO
     NO_TIPO (INT)
+    NO_ID (Nome: soma)
+    NO_LISTA_PARAMETROS
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (INT)
+        NO_ID (Nome: a)
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (INT)
+        NO_ID (Nome: b)
+    NO_BLOCO
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (INT)
+        NO_ID (Nome: resultado)
+        NO_ATRIBUICAO
+          NO_ID (Nome: resultado)
+          NO_OP_BINARIA (PLUS)
+            NO_ID (Nome: a)
+            NO_ID (Nome: b)
+      NO_RETORNO
+        NO_ID (Nome: resultado)
+  NO_DEFINICAO_FUNCAO
+    NO_TIPO (INT)
     NO_ID (Nome: main)
     NO_BLOCO
       NO_DECLARACAO_VARIAVEL
         NO_TIPO (INT)
-        NO_ID (Nome: v)
-        NO_CONST_INT (Valor: 10)
+        NO_ID (Nome: x)
+        NO_ATRIBUICAO
+          NO_ID (Nome: x)
+          NO_CONST_INT (Valor: 12)
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (INT)
+        NO_ID (Nome: y)
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (INT)
+        NO_ID (Nome: z)
+      NO_IF
+        NO_OP_BINARIA (LT)
+          NO_ID (Nome: x)
+          NO_CONST_INT (Valor: 20)
+        NO_BLOCO
+          NO_ATRIBUICAO
+            NO_ID (Nome: y)
+            NO_CONST_INT (Valor: 1)
+        NO_BLOCO
+          NO_ATRIBUICAO
+            NO_ID (Nome: y)
+            NO_CONST_INT (Valor: 2)
       NO_ATRIBUICAO
-        NO_ACESSO_ARRAY
-          NO_ID (Nome: v)
-          NO_CONST_INT (Valor: 4)
-        NO_CONST_INT (Valor: 47)
-      NO_ATRIBUICAO
-        NO_ACESSO_ARRAY
-          NO_ID (Nome: v)
-          NO_CONST_INT (Valor: 5)
-        NO_ACESSO_ARRAY
-          NO_ID (Nome: v)
-          NO_CONST_INT (Valor: 9)
+        NO_ID (Nome: z)
+        NO_CHAMADA_FUNCAO
+          NO_ID (Nome: soma)
+          NO_LISTA_ARGUMENTOS
+            NO_ID (Nome: x)
+            NO_ID (Nome: y)
+      NO_DECLARACAO_VARIAVEL
+        NO_TIPO (CHAR)
+        NO_ID (Nome: abc)
+        NO_ATRIBUICAO
+          NO_ID (Nome: abc)
+          NO_CONST_CHAR (Valor: 'P')
+      NO_PRINT
+        NO_ID (Nome: abc)
       NO_RETORNO
         NO_CONST_INT (Valor: 0)

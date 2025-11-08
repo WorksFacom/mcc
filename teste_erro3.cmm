@@ -1,0 +1,6 @@
+// arquivo: erro_semantico.cmm
+int main() {
+    int x = 10;
+    y = x + 5; // Erro! 'y' não foi declarada.
+    return 0;
+}

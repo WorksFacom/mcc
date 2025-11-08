@@ -113,6 +113,7 @@ Token proximo_token() {
         else if (strcmp(buffer, "return") == 0) token.tipo = RETURN;
         else if (strcmp(buffer, "int") == 0) token.tipo = INT;
         else if (strcmp(buffer, "char") == 0) token.tipo = CHAR;
+        else if (strcmp(buffer, "print") == 0) token.tipo = PRINT;
         else token.tipo = ID;
         strcpy(token.lexema, buffer);
         return token;
