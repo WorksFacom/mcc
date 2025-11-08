@@ -6,23 +6,33 @@ CFLAGS = -g -Wall -Isrc/tokens -Isrc/scanner -Isrc/parser -Isrc/ast -Isrc/symbol
 
 # Nome do executável final
 TARGET = mcc
+EXAMPLES_DIR = exemplos
 
 # Arquivo de entrada padrão para os testes
-# (Pode ser sobrescrito: make run INPUT=teste2.cmm)
-INPUT = teste.cmm
+# (Pode ser sobrescrito: make run INPUT=teste2.mcc)
+INPUT ?= $(EXAMPLES_DIR)/teste.mcc
+# Se o usuário passar INPUT=arquivo.mcc, adiciona o prefixo exemplos/
+ifneq ($(findstring $(EXAMPLES_DIR)/,$(INPUT)),$(EXAMPLES_DIR)/)
+	INPUT := $(EXAMPLES_DIR)/$(INPUT)
+endif
+
+
 
 
 # Pega o "nome base" do arquivo de entrada (ex: "teste")
-BASENAME = $(basename $(INPUT))
+BASENAME = $(notdir $(basename $(INPUT)))
 # Define os nomes de saída a partir do nome base (ex: "teste.s", "teste")
-ASM_OUTPUT = $(BASENAME).s
+ASM_OUTPUT = $(EXAMPLES_DIR)/$(BASENAME).s
+
 EXEC_NAME = $(BASENAME)
 
 
-# Encontra todos os arquivos .cmm no diretório
-CMM_FILES = $(wildcard *.cmm)
+# Encontra todos os arquivos .mcc no diretório
+MCC_FILES = $(wildcard $(EXAMPLES_DIR)/*.mcc)
+
 # Gera uma lista de todos os executáveis possíveis (ex: teste, codigo)
-EXEC_OUTPUTS = $(patsubst %.cmm,%,$(CMM_FILES))
+EXEC_OUTPUTS = $(patsubst $(EXAMPLES_DIR)/%.mcc,%,$(MCC_FILES))
+
 
 
 # Lista de todos os arquivos fonte (.c) do projeto
@@ -73,7 +83,7 @@ run: $(TARGET)
 	@echo "=============================================="
 	@echo ""
 	# 1. Compila o código-fonte com o compilador completo (sem flags)
-	@./$(TARGET) $(INPUT)
+	@./$(TARGET) $(EXAMPLES_DIR)/$(notdir $(INPUT))
 	
 	@echo ""
 	@echo "Compilando o assembly '$(ASM_OUTPUT)' com GCC..."
@@ -98,19 +108,20 @@ gen-asm: $(ASM_OUTPUT)
 
 
 # Alvo para criar o executável final a partir do assembly
-# A regra $(EXEC_NAME) (ex: teste) depende de $(ASM_OUTPUT) (ex: teste.s)
+# A regra $(EXEC_NAME) (ex: teste) depende de $(ASM_OUTPUT) (ex: exemplos/teste.s)
 $(EXEC_NAME): $(ASM_OUTPUT)
 	@echo "--- Compilando o Assembly '$<' com o GCC ---"
-	# $< é o pré-requisito (teste.s)
+	# $< é o pré-requisito (exemplos/teste.s)
 	# $@ é o alvo (teste)
-	$(CC) -Wl,-z,noexecstack $< -o $@
+	$(CC) -Wl,-z,noexecstack $(ASM_OUTPUT) -o $(EXEC_NAME)
 	@echo "--- Executavel '$@' criado com sucesso ---"
 
-# Esta regra ensina o 'make' a criar um arquivo .s (como teste.s)
-# a partir de um .cmm (como teste.cmm)
+
+# Esta regra ensina o 'make' a criar um arquivo .s (como exemplos/teste.s)
+# a partir de um .mcc (como exemplos/teste.mcc)
 $(ASM_OUTPUT): $(TARGET) $(INPUT)
 	@echo "--- Gerando Codigo Assembly (gen-asm) de $(INPUT) ---"
-	./$(TARGET) --gen-asm $(INPUT)
+	./$(TARGET) --gen-asm $(INPUT) -o $(ASM_OUTPUT)
 	@echo "--- [ CONTEUDO DE $(ASM_OUTPUT) ] ---"
 	@cat $(ASM_OUTPUT)
 	@echo "--- [ FIM DE $(ASM_OUTPUT) ] ---"
@@ -150,9 +161,23 @@ $(TARGET): $(OBJECTS)
 # Comando para limpar os arquivos gerados
 clean:
 ifeq ($(OS),Windows_NT)
-	-del /Q src\*.o src\scanner\*.o src\parser\*.o src\ast\*.o src\symbol_table\*.o src\semantic\*.o src\ir\*.o src\intercode\*.o src\assembly\*.o $(TARGET).exe *.s $(EXEC_OUTPUTS:%=%.exe)
+	-del /Q src\*.o src\scanner\*.o src\parser\*.o src\ast\*.o src\symbol_table\*.o src\semantic\*.o src\ir\*.o src\intercode\*.o src\assembly\*.o $(TARGET).exe *.s $(EXEC_OUTPUTS:%=%.exe) tokens.txt ast.txt ir.txt
 else
-	-rm -f src/*.o src/scanner/*.o src/parser/*.o src/ast/*.o src/symbol_table/*.o src/semantic/*.o src/ir/*.o src/intercode/*.o src/assembly/*.o $(TARGET) *.s $(EXEC_OUTPUTS)
+	-rm -f src/*.o \
+	       src/scanner/*.o \
+	       src/parser/*.o \
+	       src/ast/*.o \
+	       src/symbol_table/*.o \
+	       src/semantic/*.o \
+	       src/ir/*.o \
+	       src/intercode/*.o \
+	       src/assembly/*.o \
+	       $(TARGET) \
+	       $(EXAMPLES_DIR)/*.s \
+	       $(EXEC_OUTPUTS) \
+	       tokens.txt \
+	       ast.txt \
+	       ir.txt
 endif
 
 

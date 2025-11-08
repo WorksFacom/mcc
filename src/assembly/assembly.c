@@ -223,21 +223,13 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 //passo 2: armazena o valor do registrador no destino (result)
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
+            
+            // --- INÍCIO DA REESTRUTURAÇÃO LÓGICA ---
 
-            /**
-             * @brief traduz operações aritméticas e relacionais binárias.
-             * @detalhes traduz `result := arg1 op arg2`.
-             * usa a estratégia load-operate-store:
-             * 1. carrega arg1 em %eax.
-             * 2. carrega arg2 em %ebx.
-             * 3. opera %ebx em %eax.
-             * 4. armazena %eax em result.
-             */
-            case IR_ADD: //ex: t0 := x + y
+            //grupo 1: aritmética simples (add, sub, mul)
+            case IR_ADD:
             case IR_SUB:
             case IR_MUL:
-            case IR_LT:
-            case IR_EQ:
                 //passo 1: carrega arg1 em %eax
                 asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
                 //passo 2: carrega arg2 em %ebx
@@ -248,18 +240,90 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 if(instr->opcode == IR_SUB) asm_instr("subl %%ebx, %%eax"); //eax = eax - ebx
                 if(instr->opcode == IR_MUL) asm_instr("imull %%ebx, %%eax"); //eax = eax * ebx
 
-                //lógica para < e == (operações de comparação)
-                if(instr->opcode == IR_LT || instr->opcode == IR_EQ) {
-                    asm_instr("cmpl %%ebx, %%eax"); //compara eax com ebx
-                    asm_instr("movl $0, %%eax");   //zera o eax (prepara para resultado falso)
-                    //o 'l' em setl/sete refere-se ao registrador de 8 bits %al
-                    if(instr->opcode == IR_LT) asm_instr("setl %%al"); //setl: "set if less"
-                    if(instr->opcode == IR_EQ) asm_instr("sete %%al"); //sete: "set if equal"
-                }
-
                 //passo 4: armazena o resultado (%eax) no destino (result)
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
+
+            //grupo 2: divisão e módulo (requerem %eax e %edx)
+            case IR_DIV:
+            case IR_MOD:
+                //passo 1: carrega o dividendo (arg1) em %eax
+                asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
+                
+                //passo 2: estende o sinal de %eax para %edx (necessário para idivl)
+                asm_instr("cdq");
+                
+                //passo 3: divide edx:eax pelo divisor (arg2)
+                //o divisor não pode ser %eax ou %edx
+                asm_instr("idivl %s", get_operand_asm(instr->arg2));
+                
+                //passo 4: armazena o resultado
+                if (instr->opcode == IR_DIV) {
+                    //o quociente está em %eax
+                    asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+                } else {
+                    //o resto (módulo) está em %edx
+                    asm_instr("movl %%edx, %s", get_operand_asm(instr->result));
+                }
+                break;
+
+            //grupo 3: comparações (resultam em 0 ou 1)
+            case IR_EQ:
+            case IR_NEQ:
+            case IR_LT:
+            case IR_LEQ:
+            case IR_GT:
+            case IR_GEQ:
+                //passo 1: carrega arg1 em %eax
+                asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
+                //passo 2: carrega arg2 em %ebx
+                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
+                //passo 3: compara %eax com %ebx (cmpl fonte, destino)
+                asm_instr("cmpl %%ebx, %%eax");
+                //passo 4: zera %eax (prepara para resultado falso)
+                asm_instr("movl $0, %%eax");
+                
+                //passo 5: define o byte %al como 1 se a condição for verdadeira
+                //o 'l' em setl/sete refere-se ao registrador de 8 bits %al
+                if(instr->opcode == IR_EQ)  asm_instr("sete %%al"); //set if equal
+                if(instr->opcode == IR_NEQ) asm_instr("setne %%al"); //set if not equal
+                if(instr->opcode == IR_LT)  asm_instr("setl %%al"); //set if less
+                if(instr->opcode == IR_LEQ) asm_instr("setle %%al"); //set if less or equal
+                if(instr->opcode == IR_GT)  asm_instr("setg %%al"); //set if greater
+                if(instr->opcode == IR_GEQ) asm_instr("setge %%al"); //set if greater or equal
+                
+                //passo 6: armazena o resultado (0 ou 1) no destino
+                asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+                break;
+
+            //grupo 4: lógica booleana (and, or)
+            case IR_AND:
+            case IR_OR:
+                //lógica booleana (não bitwise)
+                //result = (arg1 != 0) && (arg2 != 0)
+                
+                //passo 1: carrega arg1 em %eax e "booleaniza" (0 ou 1)
+                asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
+                asm_instr("cmpl $0, %%eax");
+                asm_instr("setne %%al"); //al = (arg1 != 0)
+                
+                //passo 2: carrega arg2 em %ebx e "booleaniza" (0 ou 1)
+                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
+                asm_instr("cmpl $0, %%ebx");
+                asm_instr("setne %%bl"); //bl = (arg2 != 0)
+                
+                //passo 3: opera os bytes (al e bl)
+                if(instr->opcode == IR_AND) asm_instr("andb %%bl, %%al"); //al = al & bl
+                if(instr->opcode == IR_OR)  asm_instr("orb %%bl, %%al");  //al = al | bl
+                
+                //passo 4: estende o byte (%al) de volta para 32 bits (%eax)
+                asm_instr("movzbl %%al, %%eax");
+                
+                //passo 5: armazena o resultado (0 ou 1)
+                asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+                break;
+
+            // --- FIM DA REESTRUTURAÇÃO LÓGICA ---
 
             /**
              * @brief traduz a instrução ir_if_false (desvio condicional).

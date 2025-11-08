@@ -1,0 +1,18 @@
+int fibonacci(int n) {
+    int resultado;
+    
+    if (n <= 1) {
+        resultado = n;
+    } else {
+        
+        resultado = fibonacci(n - 1) + fibonacci(n - 2);
+    }
+    
+    return resultado;
+}
+
+int main() {
+    print("Calculando fibonacci(8)...");
+    print(fibonacci(8)); // Deve imprimir 21
+    return 0;
+}

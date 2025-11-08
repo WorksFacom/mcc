@@ -1,0 +1,29 @@
+int fatorial(int n) {
+    int resultado_recursivo;
+    int resultado_final;
+
+    if (n < 2) {
+        resultado_final = 1;
+    } else {
+
+        resultado_recursivo = fatorial(n - 1); 
+        
+        resultado_final = n * resultado_recursivo;
+    }
+
+    return resultado_final;
+}
+
+int main() {
+    int valor;
+    
+    print("--- Teste de Recursao ---");
+    
+    //calcular o fatorial de 5 (5! = 120)
+    
+    
+    print("O resultado de 5! e:");
+    print(fatorial(5));
+    
+    return 0;
+}
