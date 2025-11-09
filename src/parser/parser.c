@@ -113,6 +113,14 @@ ASTNode* parse(Parser *parser) {
     return root;
 }
 
+/** @brief Retorna o próximo token (lookahead) sem consumi-lo. */
+static Token* peek(Parser *parser) {
+    if (parser->current + 1 < parser->lista->tamanho) {
+        return &parser->lista->tokens[parser->current + 1];
+    }
+    return NULL;
+}
+
 /** @brief consome o token atual e avança para o próximo. */
 void advance(Parser *parser) {
     if (parser->current < parser->lista->tamanho) {
@@ -394,9 +402,32 @@ ASTNode* statement(Parser *parser) {
             return print_node;
         }
         case ID: {
-            ASTNode* node = assign(parser);
-            match(parser, SEMICOLON);
-            return node;
+            // "Espia" o token que vem DEPOIS do ID
+            Token* next_token = peek(parser); 
+            
+            if (next_token != NULL && next_token->tipo == LPAREN) {
+                // --- Caminho 1: Chamada de Função (ex: hanoi(...)) ---
+                
+                // Nós usamos a função expression(parser), 
+                // pois ela já sabe como analisar uma chamada de função
+                // (ela faz isso dentro de factor()).
+                ASTNode* call_node = expression(parser);
+                
+                // Consome o ponto-e-vírgula final
+                match(parser, SEMICOLON);
+                return call_node;
+
+            } else {
+                // --- Caminho 2: Atribuição (ex: x = ...) ---
+                
+                // Se não for uma chamada de função, 
+                // deve ser uma atribuição.
+                ASTNode* assign_node = assign(parser);
+                
+                // Consome o ponto-e-vírgula final
+                match(parser, SEMICOLON);
+                return assign_node;
+            }
         }
         case RETURN: {
             match(parser, RETURN);

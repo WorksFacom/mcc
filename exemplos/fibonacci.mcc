@@ -3,13 +3,14 @@ int fibonacci(int n) {
     
     if (n <= 1) {
         resultado = n;
-    } else {
-        
-        resultado = fibonacci(n - 1) + fibonacci(n - 2);
+        return resultado;
     }
+     
     
-    return resultado;
-}
+    return fibonacci(n - 1) + fibonacci(n - 2);
+    
+    
+    }
 
 int main() {
     print("Calculando fibonacci(8)...");

@@ -1,0 +1,38 @@
+int main() {
+    int v[5];
+    int i;
+    int j;
+    int temp;
+    v[0] = 50;
+    v[1] = 20;
+    v[2] = 40;
+    v[3] = 10;
+    v[4] = 30;
+
+    print("--- Array Desordenado ---");
+    for (i = 0; i < 5; i = i + 1) {
+        print(v[i]);
+    }
+
+    // --- algoritmo Bubble Sort ---
+
+    for (i = 0; i < 5; i = i + 1) {
+        //passa pelo array comparando pares
+        for (j = 0; j < 4; j = j + 1) {
+            if (v[j] > v[j+1]) {
+                //Troca
+                temp = v[j];
+                v[j] = v[j+1];
+                v[j+1] = temp;
+            }
+        }
+    }
+
+
+    print("--- Array Ordenado ---");
+    for (i = 0; i < 5; i = i + 1) {
+        print(v[i]);
+    }
+
+    return 0;
+}

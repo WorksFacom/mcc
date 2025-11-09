@@ -1,0 +1,24 @@
+
+int MDC(int a, int b) {
+    int resto;
+
+    if (b == 0) {
+        return a;
+    }
+
+    resto = a % b;
+    return MDC(b, resto);
+}
+
+int main() {
+    int resultado;
+    
+    print("Calculando MDC(1071, 462)...");
+
+    //resultado 21
+    
+    resultado = MDC(1071, 462);
+    
+    print(resultado);
+    return 0;
+}

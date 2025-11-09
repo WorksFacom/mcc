@@ -1,0 +1,25 @@
+int hanoi(int n, char origem, char destino, char aux) {
+    if (n > 0) {
+        //move (n-1) discos da Origem para o Auxiliar
+        hanoi(n - 1, origem, aux, destino);
+        
+        //move o disco N da Origem para o Destino
+
+        print(origem);
+        print(destino);
+        print("");
+        
+        // 3. Move (n-1) discos do Auxiliar para o Destino
+        hanoi(n - 1, aux, destino, origem);
+    }
+    return 0;
+}
+
+int main() {
+    print("--- Torre de Hanoi com 3 discos (A -> C) ---");
+    
+    // Passa os caracteres literais
+    hanoi(3, 'A', 'C', 'B');
+    
+    return 0;
+}

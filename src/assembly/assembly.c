@@ -16,7 +16,9 @@ static FILE* outfile;
 //buffer estático global para construir strings de operandos formatados
 static char asm_buffer[100];
 //contador global para o número de parâmetros sendo empilhados para uma chamada
-static int param_count = 0; 
+static int param_count = 0;
+static IROperand* param_buffer[10]; 
+static int param_buffer_count = 0;   
 
 //================================================================================
 // FUNÇÕES AUXILIARES DE GERAÇÃO
@@ -344,36 +346,44 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 asm_instr("jmp %s", get_operand_asm(instr->result));
                 break;
             
-            /**
+/**
              * @brief traduz a instrução ir_param (passagem de parâmetro).
-             * @detalhes traduz `param arg1` (ex: param x).
-             * nossa convenção de chamada simplificada empilha todos os params.
+             * @detalhes acumula parâmetros em um buffer para empilhar na ordem
+             * reversa durante o ir_call.
              */
             case IR_PARAM:
-                param_count++;
-                //passo 1: carrega o valor do parâmetro em %eax
-                asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
-                //passo 2: empurra o registrador de 64 bits (%rax) na pilha
-                asm_instr("pushq %%rax");
+                //acumula o parâmetro no buffer
+                if (param_buffer_count < 10) {
+                    param_buffer[param_buffer_count] = instr->arg1;
+                }
+                param_buffer_count++;
                 break;
                 
             /**
              * @brief traduz a instrução ir_call (chamada de função).
-             * @detalhes traduz `result := call arg1, arg2` (ex: t2 := call soma, 2).
-             * o valor de retorno é (por convenção) sempre deixado em %eax.
+             * @detalhes empilha os parâmetros acumulados na ordem reversa,
+             * chama a função, limpa a pilha e salva o retorno.
              */
             case IR_CALL:
-                //passo 1: chama a função (o label está em arg1)
-                asm_instr("call %s", get_operand_asm(instr->arg1));
-                
-                //passo 2: limpa os parâmetros da pilha
-                if (param_count > 0) {
-                    //simplesmente limpa os n parâmetros (n * 8 bytes)
-                    asm_instr("addq $%d, %%rsp", param_count * 8);
-                    param_count = 0; //reseta o contador
+                //passo 1: empilha os parâmetros na ordem reversa (da direita para a esquerda)
+                for (int i = param_buffer_count - 1; i >= 0; i--) {
+                    asm_instr("movl %s, %%eax", get_operand_asm(param_buffer[i]));
+                    asm_instr("pushq %%rax");
                 }
                 
-                //passo 3: armazena o valor de retorno (que está em %eax) no destino
+                //passo 2: chama a função (o label está em arg1)
+                asm_instr("call %s", get_operand_asm(instr->arg1));
+                
+                //passo 3: limpa os parâmetros da pilha
+                if (param_buffer_count > 0) {
+                    asm_instr("addq $%d, %%rsp", param_buffer_count * 8);
+                }
+                
+                //passo 4: reseta os contadores de parâmetro
+                param_buffer_count = 0;
+                param_count = 0; //(seu contador antigo, resetando por segurança)
+                
+                //passo 5: armazena o valor de retorno (que está em %eax) no destino
                 if (instr->result) {
                     asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 }

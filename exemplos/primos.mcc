@@ -1,0 +1,40 @@
+int main() {
+    int max;
+    max = 30; //encontrar primos ate 30
+
+    int primos[30]; // 0= falso, 1 = verdadeiro
+    int p; //numero primo atual
+    int i; 
+
+    print("--- Calculando Primos ate 30 ---");
+
+    //inicializa todos como  1
+    // (ignoramos 0 e 1)
+    for (i = 2; i < max; i = i + 1) {
+        primos[i] = 1;
+    }
+
+ 
+    for (p = 2; p < max; p = p + 1) {
+        
+        //se p ainda e primo...
+        if (primos[p] == 1) {
+        
+            //entao marque todos os seus multiplos como "nao primos" (0)
+            
+            for (i = p + p; i < max; i = i + p) {
+                primos[i] = 0;
+            }
+        }
+    }
+
+
+    print("Primos encontrados:");
+    for (i = 2; i < max; i = i + 1) {
+        if (primos[i] == 1) {
+            print(i);
+        }
+    }
+
+    return 0;
+}
