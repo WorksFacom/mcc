@@ -1,4 +1,4 @@
-# Compilador Didático para Linguagem Simple-C
+# Compilador Didático para Linguagem Micro C
 
 Este é um compilador com fins acadêmicos para uma sublinguagem simplificada baseada em C.  
 O projeto foi desenvolvido em **C** e implementa a **pipeline completa de compilação**,  
