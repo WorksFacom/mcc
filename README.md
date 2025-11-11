@@ -4,6 +4,8 @@ Este é um compilador com fins acadêmicos para uma sublinguagem simplificada ba
 O projeto foi desenvolvido em **C** e implementa a **pipeline completa de compilação**,  
 desde o código-fonte até a geração de um executável binário.
 
+Uma documentação mais compreensiva do código está disponível online [aqui](https://facom.ufms.br/~brivaldo/mcc/).
+
 ## Fases Implementadas
 
 1. **Análise Léxica (Scanner):** Converte o código-fonte em uma sequência de tokens.  
