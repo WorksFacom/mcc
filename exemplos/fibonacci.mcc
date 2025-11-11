@@ -6,11 +6,8 @@ int fibonacci(int n) {
         return resultado;
     }
      
-    
-    return fibonacci(n - 1) + fibonacci(n - 2);
-    
-    
-    }
+    return fibonacci(n - 1) + fibonacci(n - 2);    
+}
 
 int main() {
     print("Calculando fibonacci(8)...");
