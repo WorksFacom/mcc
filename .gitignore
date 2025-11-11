@@ -90,3 +90,6 @@ dkms.conf
 ast.txt
 ir.txt
 tokens.txt
+
+# Remove vscode
+.vscode
