@@ -17,6 +17,10 @@
 #include "intercode/intercode.h"
 #include "assembly/assembly.h"
 
+//definicoes
+#define VERSION "0.1"
+
+
 //protótipos de funções auxiliares
 void imprimir_tokens(TokenList* tokens);
 void salvar_tokens_em_arquivo(TokenList* tokens, bool verbose);
@@ -53,7 +57,7 @@ int executar_analise_lexica(const char* nome_arquivo, TokenList* lista) {
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Erro: Arquivo fonte nao especificado.\n");
-        fprintf(stderr, "Uso: %s [--scan | --parse | --semantic | --gen-ir | --gen-asm] <arquivo_fonte.cmm>\n", argv[0]);
+        fprintf(stderr, "Uso: %s [--scan|--parse |--semantic |--gen-ir|--gen-asm|--version] <arquivo_fonte.mcc>\n", argv[0]);
         return -1;
     }
 
@@ -64,6 +68,12 @@ int main(int argc, char* argv[]) {
     if (argc > 2) {
         modo = argv[1];
         nome_arquivo = argv[2];
+    }
+    
+    //mostra a versao atual do compilador e sai
+    if (strcmp(modo, "--version") != 0) {
+	fprintf(stdout, "versao: %s\n", VERSION);
+	return 0;
     }
     
     //fase 1: análise léxica

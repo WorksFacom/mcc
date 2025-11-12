@@ -10,30 +10,27 @@ EXAMPLES_DIR = exemplos
 
 # Arquivo de entrada padrão para os testes
 # (Pode ser sobrescrito: make run INPUT=teste2.mcc)
-INPUT ?= $(EXAMPLES_DIR)/teste.mcc
+INPUT ?= $(EXAMPLES_DIR)/hanoi.mcc
+
 # Se o usuário passar INPUT=arquivo.mcc, adiciona o prefixo exemplos/
 ifneq ($(findstring $(EXAMPLES_DIR)/,$(INPUT)),$(EXAMPLES_DIR)/)
 	INPUT := $(EXAMPLES_DIR)/$(INPUT)
 endif
 
 
-
-
 # Pega o "nome base" do arquivo de entrada (ex: "teste")
 BASENAME = $(notdir $(basename $(INPUT)))
+
 # Define os nomes de saída a partir do nome base (ex: "teste.s", "teste")
 ASM_OUTPUT = $(EXAMPLES_DIR)/$(BASENAME).s
 
 EXEC_NAME = $(BASENAME)
-
 
 # Encontra todos os arquivos .mcc no diretório
 MCC_FILES = $(wildcard $(EXAMPLES_DIR)/*.mcc)
 
 # Gera uma lista de todos os executáveis possíveis (ex: teste, codigo)
 EXEC_OUTPUTS = $(patsubst $(EXAMPLES_DIR)/%.mcc,%,$(MCC_FILES))
-
-
 
 # Lista de todos os arquivos fonte (.c) do projeto
 SOURCES = src/main.c \
@@ -60,8 +57,6 @@ DEPS = src/scanner/scanner.h \
        src/intercode/intercode.h \
        src/assembly/assembly.h
 
-
-
 # 'make' ou 'make all' irá apenas compilar o programa.
 all: $(TARGET)
 	@echo "------------------------------------------------------------------"
@@ -75,8 +70,22 @@ all: $(TARGET)
 	@echo "   make run       (para compilar e rodar o '$(INPUT)')"
 	@echo "------------------------------------------------------------------"
 
-# 'make run' compila e executa o código fonte de teste
 
+# 'make install' compila e instala o software no sistema
+install: $(TARGET)
+	@echo "Instalando no Sistema (sudo pode ser necessário)"
+	@echo ""
+	install -m 0755 $(TARGET) /usr/local/bin/$(TARGET)
+
+
+# 'make uninstall' compila e instala o software no sistema
+uninstall:
+	@echo "Removendo o $(TARGET) do Sistema (sudo pode ser necessário)"
+	@echo ""
+	rm /usr/local/bin/$(TARGET)
+
+
+# 'make run' compila e executa o código fonte de teste
 run: $(TARGET)
 	@echo "=============================================="
 	@echo "Iniciando compilação completa de: $(INPUT)"
@@ -103,7 +112,6 @@ run: $(TARGET)
 
 
 # 'make gen-asm' roda o compilador até a geração de assembly
-
 gen-asm: $(ASM_OUTPUT)
 
 
@@ -147,8 +155,8 @@ gen-ir: $(TARGET)
 	@echo "--- Gerando Codigo Intermediario (gen-ir) de $(INPUT) ---"
 	./$(TARGET) --gen-ir $(INPUT)
 
-# --- REGRAS DE COMPILAÇÃO E LIMPEZA ---
 
+# --- REGRAS DE COMPILAÇÃO E LIMPEZA ---
 # Regra para linkar os arquivos objeto e criar o executável final
 $(TARGET): $(OBJECTS)
 	$(CC) $(OBJECTS) -o $(TARGET)
@@ -156,7 +164,6 @@ $(TARGET): $(OBJECTS)
 # Regra genérica para compilar um arquivo .c em um .o
 %.o: %.c $(DEPS)
 	$(CC) $(CFLAGS) -c $< -o $@
-
 
 # Comando para limpar os arquivos gerados
 clean:
@@ -182,4 +189,4 @@ endif
 
 
 # Declara alvos que não são arquivos
-.PHONY: all clean run scan parse semantic gen-ir gen-asm
+.PHONY: all clean install uninstall run scan parse semantic gen-ir gen-asm
