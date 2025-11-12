@@ -39,11 +39,14 @@ O código-fonte está organizado de forma modular dentro da pasta `src/`:
 
 O projeto utiliza um `Makefile` para automatizar o processo de compilação e execução das fases.
 
-### 1. Compilar o Compilador
+1. Compilar o Compilador
 
 ```bash
 $ make
 ```
+
+você pode instalar ou remover utilizando `make install` e `make uninstall`, respectivamente. Podem ser necessárias permissões de administrador (`sudo`).
+
 
 2. Executar as Fases de Análise
 
