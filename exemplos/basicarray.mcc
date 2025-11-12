@@ -1,4 +1,4 @@
-// arquivo: teste_array.cmm
+// arquivo: basicarray.mcc
 int main() {
     int v[10];
     int indice = 3;
@@ -11,3 +11,4 @@ int main() {
     
     return 0;
 }
+
