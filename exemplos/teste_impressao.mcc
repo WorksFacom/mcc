@@ -1,4 +1,4 @@
-// arquivo: teste_char.cmm
+// arquivo: teste_impressao.mcc
 int main() {
     char c = 'A';
     print(c); // Deve imprimir 'A'
@@ -7,3 +7,4 @@ int main() {
     print(c); // Deve imprimir 'B'
     return 0;
 }
+
