@@ -1,6 +1,7 @@
-// arquivo: erro_semantico.cmm
+// arquivo: erro_semantico.mcc
 int main() {
     int x = 10;
     y = x + 5; // Erro! 'y' não foi declarada.
     return 0;
+
 }
