@@ -116,13 +116,19 @@ int main(int argc, char* argv[]) {
     }
 
     //fase 3: análise semântica
-    analisar_semanticamente(arvore, pilha_simbolos);
+    // Determina se deve imprimir no terminal
+    bool verbose_semantic = (strcmp(modo, "--semantic") == 0);
+    
+    // Chama a análise passando o flag de verbose (arquivo symbols.txt sempre é gerado)
+    analisar_semanticamente(arvore, pilha_simbolos, verbose_semantic);
+    
     printf("Fase 3 (Semantica) concluida: Codigo validado.\n");
 
 
     //modo semantic
     if (strcmp(modo, "--semantic") == 0) {
         printf("\n--- MODO DE ANALISE SEMANTICA CONCLUIDO ---\n");
+        printf("Arquivo 'symbols.txt' gerado com sucesso.\n"); // Feedback visual
         liberar_arvore(arvore);
         destruir_pilha_tabelas(pilha_simbolos);
         liberar_token_list(&tokens);
@@ -134,17 +140,17 @@ int main(int argc, char* argv[]) {
     printf("Fase 4 (Geracao de IR) concluida.\n");
     
     //salva o arquivo de ir silenciosamente
-    salvar_ir_em_arquivo(ir_head, false); // <-- ADIÇÃO AQUI
+    salvar_ir_em_arquivo(ir_head, false); 
 
     //modo gen-ir
     if (strcmp(modo, "--gen-ir") == 0) {
         printf("\n--- MODO DE GERACAO DE CODIGO INTERMEDIARIO ---\n");
         imprimir_ir(ir_head);
-        salvar_ir_em_arquivo(ir_head, true); // <-- ADIÇÃO AQUI
+        salvar_ir_em_arquivo(ir_head, true); 
 
         //limpeza de memória com a ordem correta
         liberar_arvore(arvore);
-        liberar_ir(ir_head); // 
+        liberar_ir(ir_head); 
         destruir_pilha_tabelas(pilha_simbolos);
         liberar_token_list(&tokens);
         return 0;
@@ -179,7 +185,7 @@ int main(int argc, char* argv[]) {
         liberar_ir(ir_head);
         destruir_pilha_tabelas(pilha_simbolos);
         liberar_token_list(&tokens);
-        return 0; // <-- CORREÇÃO AQUI
+        return 0; 
     }
     
     //modo completo (default)

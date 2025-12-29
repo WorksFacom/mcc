@@ -8,13 +8,13 @@ CFLAGS = -g -Wall -Isrc/tokens -Isrc/scanner -Isrc/parser -Isrc/ast -Isrc/symbol
 TARGET = mcc
 EXAMPLES_DIR = exemplos
 
-# Arquivo de entrada padrão para os testes
-# (Pode ser sobrescrito: make run INPUT=teste2.mcc)
-INPUT ?= $(EXAMPLES_DIR)/hanoi.mcc
+# Arquivo de entrada padrão
+INPUT ?= $(EXAMPLES_DIR)/base.mcc
 
 # Se o usuário passar INPUT=arquivo.mcc, adiciona o prefixo exemplos/
+# O 'override' garante que essa mudança funcione mesmo passando via terminal
 ifneq ($(findstring $(EXAMPLES_DIR)/,$(INPUT)),$(EXAMPLES_DIR)/)
-	INPUT := $(EXAMPLES_DIR)/$(INPUT)
+    override INPUT := $(EXAMPLES_DIR)/$(INPUT)
 endif
 
 
@@ -168,7 +168,7 @@ $(TARGET): $(OBJECTS)
 # Comando para limpar os arquivos gerados
 clean:
 ifeq ($(OS),Windows_NT)
-	-del /Q src\*.o src\scanner\*.o src\parser\*.o src\ast\*.o src\symbol_table\*.o src\semantic\*.o src\ir\*.o src\intercode\*.o src\assembly\*.o $(TARGET).exe *.s $(EXEC_OUTPUTS:%=%.exe) tokens.txt ast.txt ir.txt
+	-del /Q src\*.o src\scanner\*.o src\parser\*.o src\ast\*.o src\symbol_table\*.o src\semantic\*.o src\ir\*.o src\intercode\*.o src\assembly\*.o $(TARGET).exe *.s $(EXEC_OUTPUTS:%=%.exe) tokens.txt symbols.txt ast.txt ir.txt
 else
 	-rm -f src/*.o \
 	       src/scanner/*.o \
@@ -183,6 +183,7 @@ else
 	       $(EXAMPLES_DIR)/*.s \
 	       $(EXEC_OUTPUTS) \
 	       tokens.txt \
+		   symbols.txt \
 	       ast.txt \
 	       ir.txt
 endif

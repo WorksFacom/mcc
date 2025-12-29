@@ -1,6 +1,7 @@
 #ifndef SYMBOL_TABLE_H
 #define SYMBOL_TABLE_H
 
+#include <stdio.h>
 #include "tokens.h"
 
 /**
@@ -54,8 +55,10 @@ void empilhar_tabela(PilhaTabelasSimbolos *pilha);
 /** @brief desempilha a tabela de símbolos do topo, fechando o escopo atual. */
 void desempilhar_tabela(PilhaTabelasSimbolos *pilha);
 
-/** @brief adiciona um novo símbolo à tabela que está no topo da pilha. */
-int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size, int is_parameter);
+/** * @brief adiciona um novo símbolo à tabela que está no topo da pilha. 
+ * @return Retorna um ponteiro para o símbolo criado (Simbolo*) ou NULL em caso de erro.
+ */
+Simbolo* adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size, int is_parameter);
 
 /** @brief busca por um símbolo apenas na tabela do escopo atual (topo da pilha). */
 Simbolo* buscar_simbolo_no_escopo_atual(PilhaTabelasSimbolos *pilha, const char *nome);
@@ -63,4 +66,11 @@ Simbolo* buscar_simbolo_no_escopo_atual(PilhaTabelasSimbolos *pilha, const char 
 /** @brief busca por um símbolo em todas as tabelas, do escopo atual para o global. */
 Simbolo* buscar_simbolo_em_todos_escopos(PilhaTabelasSimbolos *pilha, const char *nome);
 
-#endif
+/** * @brief Gera uma representação visual formatada da tabela de símbolos.
+ * @param t Ponteiro para a tabela a ser impressa.
+ * @param nome_escopo Uma string descrevendo o escopo (ex: "Global", "Funcao fatorial").
+ * @param out Ponteiro para o arquivo onde será escrito (pode ser um arquivo .txt ou stdout).
+ */
+void imprimir_tabela(TabelaSimbolos* t, const char* nome_escopo, FILE* out);
+
+#endif // SYMBOL_TABLE_H

@@ -157,8 +157,10 @@ void error(Parser *parser, const char *msg) {
 //SEÇÃO DAS FUNÇÕES DA GRAMÁTICA (RECURSIVE DESCENT)
 //================================================================================
 
-//declaração antecipada, pois as funções de expressão se chamam mutuamente
+//declaração antecipada das funções
 ASTNode* expression(Parser *parser);
+static ASTNode* logical_and_expression(Parser *parser);
+static ASTNode* relational_expression(Parser *parser);
 ASTNode* arithmetic_expression(Parser* parser);
 ASTNode* arg_list(Parser *parser);
 
@@ -252,8 +254,8 @@ ASTNode* arithmetic_expression(Parser* parser) {
     return node;
 }
 
-/** @brief processa uma expressão (incluindo relacionais). */
-ASTNode* expression(Parser *parser) {
+/** @brief função interna para processar expressões relacionais/igualdade (precedência maior que AND/OR). */
+static ASTNode* relational_expression(Parser *parser) {
     ASTNode* node = arithmetic_expression(parser);
     while (parser->current_token && (parser->current_token->tipo == LT || parser->current_token->tipo == LEQ ||
                                      parser->current_token->tipo == GT || parser->current_token->tipo == GEQ ||
@@ -265,6 +267,36 @@ ASTNode* expression(Parser *parser) {
         op_node->data.op_type = op;
         adicionar_filho(op_node, node);
         adicionar_filho(op_node, arithmetic_expression(parser));
+        node = op_node;
+    }
+    return node;
+}
+
+/** @brief função interna para processar E lógico (&&) (precedência maior que OR). */
+static ASTNode* logical_and_expression(Parser *parser) {
+    ASTNode* node = relational_expression(parser);
+    while (parser->current_token && parser->current_token->tipo == AND) {
+        int line = parser->current_token->linha;
+        match(parser, AND);
+        ASTNode* op_node = criar_no(NODE_BINARY_OP, line);
+        op_node->data.op_type = AND;
+        adicionar_filho(op_node, node);
+        adicionar_filho(op_node, relational_expression(parser));
+        node = op_node;
+    }
+    return node;
+}
+
+/** @brief processa uma expressão completa (ponto de entrada para OU lógico ||). */
+ASTNode* expression(Parser *parser) {
+    ASTNode* node = logical_and_expression(parser);
+    while (parser->current_token && parser->current_token->tipo == OR) {
+        int line = parser->current_token->linha;
+        match(parser, OR);
+        ASTNode* op_node = criar_no(NODE_BINARY_OP, line);
+        op_node->data.op_type = OR;
+        adicionar_filho(op_node, node);
+        adicionar_filho(op_node, logical_and_expression(parser));
         node = op_node;
     }
     return node;

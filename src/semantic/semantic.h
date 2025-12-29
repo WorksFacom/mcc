@@ -1,6 +1,7 @@
 #ifndef SEMANTIC_H
 #define SEMANTIC_H
 
+#include <stdbool.h> // Necessário para o tipo 'bool'
 #include "ast.h"
 #include "symbol_table.h"
 
@@ -20,7 +21,8 @@
  * para validar o programa.
  * @param raiz o nó raiz da árvore sintática abstrata gerada pelo parser.
  * @param pilha a pilha da tabela de símbolos, para gerenciamento de escopo e contexto.
+ * @param verbose se true, imprime a tabela de símbolos no terminal (stdout) além de gerar o arquivo.
  */
-void analisar_semanticamente(ASTNode* raiz, PilhaTabelasSimbolos* pilha);
+void analisar_semanticamente(ASTNode* raiz, PilhaTabelasSimbolos* pilha, bool verbose);
 
 #endif //SEMANTIC_H

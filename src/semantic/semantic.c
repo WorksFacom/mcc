@@ -11,7 +11,12 @@
  * este módulo percorre a árvore sintática abstrata (ast) para realizar
  * checagens de tipo, de declaração e de escopo. ele utiliza a
  * tabela de símbolos e calcula os deslocamentos de memória para o back-end.
+ * Além disso, gera uma representação visual da tabela de símbolos.
  */
+
+// Variáveis para controle da saída visual da tabela de símbolos
+static FILE* arquivo_simbolos = NULL;
+static bool modo_verbose = false;
 
 //protótipos de funções estáticas
 static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escopo_funcao_atual, bool is_param_decl);
@@ -31,8 +36,9 @@ static void erro_semantico(const char* msg, int linha) {
  * @return o tamanho em bytes do símbolo.
  */
 static int get_symbol_size(Simbolo* s) {
-    //para nossa linguagem simples, int e char ocupam 4 bytes (para alinhamento de 32-bits)
-    int tipo_base_size = 4;
+    //se for CHAR, o tamanho base é 1 byte. Se for INT, é 4 bytes.
+    int tipo_base_size = (s->tipo == CHAR) ? 1 : 4;
+    
     if (s->is_array) {
         return s->array_size * tipo_base_size;
     }
@@ -114,11 +120,24 @@ static TokenType get_expression_type(ASTNode* expr_node, PilhaTabelasSimbolos* p
                 snprintf(msg, sizeof(msg), "Variavel '%s' nao foi declarada.", expr_node->data.string_value);
                 erro_semantico(msg, expr_node->linha);
             }
+            
+            // --- LINKAGEM: SALVA O PONTEIRO DO SIMBOLO NO NO DA AST ---
+            expr_node->symbol = simbolo;
+            // ----------------------------------------------------------
+            
             if (simbolo->is_array) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Nome de array '%s' nao pode ser usado como uma variavel simples.", simbolo->nome);
-                erro_semantico(msg, expr_node->linha);
+                // Se for array de CHAR, permitimos uso como variável simples (ponteiro/string)
+                if (simbolo->tipo == CHAR) {
+                    return STRINGCONST; 
+                } 
+                // Se for array de INT (ou outro), mantemos a proibição
+                else {
+                    char msg[200];
+                    snprintf(msg, sizeof(msg), "O array '%s' (tipo int) nao pode ser usado sem indice (apenas arrays char/strings).", simbolo->nome);
+                    erro_semantico(msg, expr_node->linha);
+                }
             }
+            
             if (simbolo->is_function) {
                 char msg[200];
                 snprintf(msg, sizeof(msg), "'%s' e uma funcao e nao pode ser usada como variavel.", simbolo->nome);
@@ -134,11 +153,22 @@ static TokenType get_expression_type(ASTNode* expr_node, PilhaTabelasSimbolos* p
                 snprintf(msg, sizeof(msg), "Array '%s' nao foi declarado.", id_no->data.string_value);
                 erro_semantico(msg, id_no->linha);
             }
+            
+            // --- LINKAGEM: SALVA O SIMBOLO NO FILHO (ID) ---
+            id_no->symbol = simbolo;
+            // -----------------------------------------------
+
             if (!simbolo->is_array) {
                 char msg[200];
                 snprintf(msg, sizeof(msg), "Variavel '%s' nao e um array e nao pode ser indexada.", simbolo->nome);
                 erro_semantico(msg, id_no->linha);
             }
+            
+            // Recursão para validar o índice (e linkar símbolos dentro dele)
+            if (get_expression_type(id_no->proximo_irmao, pilha, NULL) != INT) {
+                erro_semantico("Indice de array deve ser do tipo inteiro.", expr_node->linha);
+            }
+            
             return simbolo->tipo;
         }
         case NODE_BINARY_OP: {
@@ -156,6 +186,11 @@ static TokenType get_expression_type(ASTNode* expr_node, PilhaTabelasSimbolos* p
                 snprintf(msg, sizeof(msg), "Funcao '%s' nao foi declarada.", id_no->data.string_value);
                 erro_semantico(msg, id_no->linha);
             }
+            
+            // --- LINKAGEM: SALVA O SIMBOLO DA FUNCAO ---
+            id_no->symbol = func_simbolo;
+            // -------------------------------------------
+
             if (!func_simbolo->is_function) {
                 char msg[200];
                 snprintf(msg, sizeof(msg), "'%s' nao e uma funcao e nao pode ser chamada.", func_simbolo->nome);
@@ -213,10 +248,14 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
                 snprintf(msg, sizeof(msg), "Funcao '%s' ja foi declarada.", nome_func);
                 erro_semantico(msg, id_no->linha);
             }
-            adicionar_simbolo(pilha, nome_func, tipo_retorno, 1, 0, 0, 0); //0 = não é parâmetro
+            
+            // --- LINKAGEM: Captura o símbolo e salva no nó ---
+            Simbolo* s = adicionar_simbolo(pilha, nome_func, tipo_retorno, 1, 0, 0, 0); //0 = não é parâmetro
+            id_no->symbol = s;
+            // -------------------------------------------------
             
             //define o escopo da função atual para os nós filhos
-            proxima_funcao_escopo = buscar_simbolo_no_escopo_atual(pilha, nome_func);
+            proxima_funcao_escopo = s;
             
             //1. cria o escopo da função (para params e locais)
             empilhar_tabela(pilha);
@@ -253,8 +292,20 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
             if (novo_escopo) {
                 calcular_offsets(pilha->tabelas[pilha->topo]);
                 
-                //nota: não desempilhamos. 
-                //a pilha deve ser persistente para a fase de ir.
+                // --- IMPRESSÃO DA TABELA DE SÍMBOLOS (FUNÇÃO) ---
+                if (arquivo_simbolos) {
+                    char titulo[100];
+                    sprintf(titulo, "Funcao: %s", nome_func);
+                    imprimir_tabela(pilha->tabelas[pilha->topo], titulo, arquivo_simbolos);
+                    if (modo_verbose) {
+                        imprimir_tabela(pilha->tabelas[pilha->topo], titulo, stdout);
+                    }
+                }
+                // -----------------------------------------------
+
+                //nota: não desempilhamos aqui para manter a memória viva para o backend.
+                //a limpeza real ocorre no final do programa.
+                desempilhar_tabela(pilha);
             }
             
             //7. retorna para impedir o loop recursivo padrão no final de analisar_no
@@ -283,8 +334,10 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
                 erro_semantico(msg, id_no->linha);
             }
             
-            //passa a flag 'is_param_decl' para a tabela de símbolos
-            adicionar_simbolo(pilha, nome_var, tipo_var, 0, is_array, array_size, is_param_decl);
+            // --- LINKAGEM: Captura o símbolo e salva no nó ---
+            Simbolo* s = adicionar_simbolo(pilha, nome_var, tipo_var, 0, is_array, array_size, is_param_decl);
+            id_no->symbol = s;
+            // -------------------------------------------------
 
             if (is_param_decl) { 
                  if (escopo_funcao_atual->num_parametros < MAX_PARAMETROS) {
@@ -295,7 +348,9 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
 
             if (proximo_no && proximo_no->node_type == NODE_ASSIGN) {
                 int string_len = 0;
+                // Importante: Chama get_expression_type para o lado direito para garantir a linkagem dos símbolos lá!
                 TokenType tipo_expr = get_expression_type(proximo_no->filho->proximo_irmao, pilha, &string_len);
+                
                 if (is_array) {
                     if (tipo_var == CHAR && tipo_expr == STRINGCONST) {
                         if (string_len > array_size) {
@@ -315,44 +370,32 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
             return; //retorna para não visitar os filhos de var_decl
         }
         
-        case NODE_ARRAY_ACCESS: {
-            ASTNode* id_no = no->filho;
-            ASTNode* index_expr_no = id_no->proximo_irmao;
-            Simbolo* simbolo = buscar_simbolo_em_todos_escopos(pilha, id_no->data.string_value);
-            if (!simbolo) {
-                 char msg[200];
-                 snprintf(msg, sizeof(msg), "Array '%s' nao foi declarado.", id_no->data.string_value);
-                 erro_semantico(msg, id_no->linha);
-            }
-            if (!simbolo->is_array) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Variavel '%s' nao e um array e nao pode ser indexada.", simbolo->nome);
-                erro_semantico(msg, id_no->linha);
-            }
-            if (get_expression_type(index_expr_no, pilha, NULL) != INT) {
-                erro_semantico("Indice de array deve ser do tipo inteiro.", index_expr_no->linha);
-            }
-            if (index_expr_no->node_type == NODE_INTEGER_CONST) {
-                long index_val = index_expr_no->data.int_value;
-                if (index_val >= simbolo->array_size) {
-                    char msg[200];
-                    snprintf(msg, sizeof(msg), "Indice de array (%ld) fora dos limites do array '%s' (tamanho %d).", index_val, simbolo->nome, simbolo->array_size);
-                    erro_semantico(msg, index_expr_no->linha);
-                }
+        // --- CORREÇÃO: Forçar linkagem em estruturas de controle ---
+        case NODE_IF: {
+            ASTNode* cond = no->filho;
+            get_expression_type(cond, pilha, NULL); // Linka símbolos na condição
+            break; 
+        }
+        case NODE_FOR: {
+            ASTNode* init = no->filho;
+            ASTNode* cond = init->proximo_irmao;
+            ASTNode* inc = cond->proximo_irmao;
+            
+            // Linka símbolos na condição e incremento
+            if (cond && cond->node_type != NODE_UNDEFINED) get_expression_type(cond, pilha, NULL);
+            if (inc) {
+                 if (inc->node_type == NODE_ASSIGN) {
+                     get_expression_type(inc->filho, pilha, NULL);
+                     get_expression_type(inc->filho->proximo_irmao, pilha, NULL);
+                 } else {
+                     get_expression_type(inc, pilha, NULL);
+                 }
             }
             break;
         }
-        
-        case NODE_ASSIGN: {
-            TokenType tipo_esq = get_expression_type(no->filho, pilha, NULL);
-            TokenType tipo_dir = get_expression_type(no->filho->proximo_irmao, pilha, NULL);
-            if (tipo_esq != tipo_dir) {
-                erro_semantico("Atribuicao de tipos incompativeis.", no->linha);
-            }
-            break;
-        }
-        
         case NODE_RETURN: {
+            if (no->filho) get_expression_type(no->filho, pilha, NULL);
+            // Continua a verificação semântica padrão abaixo
             if (escopo_funcao_atual == NULL) {
                 erro_semantico("Comando 'return' encontrado fora de uma funcao.", no->linha);
             }
@@ -362,9 +405,11 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
                 snprintf(msg, sizeof(msg), "Tipo de retorno incompativel para a funcao '%s'.", escopo_funcao_atual->nome);
                 erro_semantico(msg, no->linha);
             }
-            break;
+            return; // Já analisado
         }
         case NODE_PRINT: {
+            if (no->filho) get_expression_type(no->filho, pilha, NULL);
+            // Continua verificação abaixo
             ASTNode* expr_no = no->filho;
             if (expr_no == NULL) {
                 erro_semantico("Comando 'print' espera um argumento para imprimir.", no->linha);
@@ -373,8 +418,29 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
             if (tipo_expr != INT && tipo_expr != CHAR && tipo_expr != STRINGCONST) {
                 erro_semantico("Argumento invalido para 'print'. So e possivel imprimir int, char ou uma string literal.", expr_no->linha);
             }
-            break;
+            return;
         }
+        case NODE_ASSIGN: {
+            // Garante linkagem em ambos os lados
+            get_expression_type(no->filho, pilha, NULL);
+            get_expression_type(no->filho->proximo_irmao, pilha, NULL);
+            
+            TokenType tipo_esq = get_expression_type(no->filho, pilha, NULL);
+            TokenType tipo_dir = get_expression_type(no->filho->proximo_irmao, pilha, NULL);
+            if (tipo_esq != tipo_dir) {
+                erro_semantico("Atribuicao de tipos incompativeis.", no->linha);
+            }
+            return;
+        }
+        case NODE_CALL: {
+            get_expression_type(no, pilha, NULL);
+            return;
+        }
+        case NODE_ARRAY_ACCESS: {
+            get_expression_type(no, pilha, NULL);
+            return;
+        }
+        // -----------------------------------------------------------
 
         default: break;
     }
@@ -395,6 +461,18 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
         //calcula os offsets para as variáveis deste escopo
         calcular_offsets(pilha->tabelas[pilha->topo]);
         
+        // --- IMPRESSÃO DE BLOCOS ANÔNIMOS (IF/FOR/WHILE) ---
+        // Apenas se for um bloco puro (não função) e tivermos arquivo aberto
+        if (no->node_type == NODE_BLOCK && arquivo_simbolos) {
+            char titulo[50];
+            sprintf(titulo, "Bloco Interno (Linha %d)", no->linha);
+            imprimir_tabela(pilha->tabelas[pilha->topo], titulo, arquivo_simbolos);
+            if (modo_verbose) {
+                imprimir_tabela(pilha->tabelas[pilha->topo], titulo, stdout);
+            }
+        }
+        // ---------------------------------------------------
+        
         desempilhar_tabela(pilha); 
 
     }
@@ -402,11 +480,32 @@ static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escop
 
 
 /** @brief função principal que dispara a análise semântica. */
-void analisar_semanticamente(ASTNode* raiz, PilhaTabelasSimbolos* pilha) {
+void analisar_semanticamente(ASTNode* raiz, PilhaTabelasSimbolos* pilha, bool verbose) {
     if (raiz == NULL) {
         printf("Aviso: Arvore sintatica vazia. Nada para analisar.\n");
         return;
     }
+
+    // Configura os arquivos e modo verbose
+    modo_verbose = verbose;
+    arquivo_simbolos = fopen("symbols.txt", "w");
+    if (!arquivo_simbolos) {
+        perror("Aviso: Nao foi possivel criar symbols.txt");
+    }
+
     analisar_no(raiz, pilha, NULL, false);
     
+    // --- IMPRIME O ESCOPO GLOBAL (BASE DA PILHA) AO FINAL ---
+    if (arquivo_simbolos && pilha->topo >= 0) {
+        imprimir_tabela(pilha->tabelas[0], "GLOBAL", arquivo_simbolos);
+        if (modo_verbose) {
+            imprimir_tabela(pilha->tabelas[0], "GLOBAL", stdout);
+        }
+    }
+    // --------------------------------------------------------
+
+    if (arquivo_simbolos) {
+        fclose(arquivo_simbolos);
+        arquivo_simbolos = NULL;
+    }
 }

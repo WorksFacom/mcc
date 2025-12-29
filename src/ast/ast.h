@@ -66,6 +66,12 @@ typedef struct ASTNode {
     /** @brief ponteiro para o próximo nó no mesmo nível hierárquico (irmão). */
     struct ASTNode *proximo_irmao;
 
+    /** * @brief ponteiro para o símbolo correspondente na tabela de símbolos.
+     * @details Preenchido durante a análise semântica. Permite que o backend acesse
+     * informações do símbolo (tipo, offset de memória) diretamente pela AST.
+     */
+    void* symbol;
+
     /** @brief união para armazenar dados específicos do nó de forma eficiente. */
     union {
         long int_value;      ///< usado por nós do tipo NODE_INTEGER_CONST.

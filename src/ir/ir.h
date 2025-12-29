@@ -36,9 +36,12 @@ typedef enum {
     IR_NOT,         //negação lógica (ex: !x)
 
     //opcodes de movimentação de dados
+    IR_STRCPY,
     IR_ASSIGN,      //resultado = arg1 (mov)
     IR_STORE,       //armazena em um array: resultado[arg2] = arg1
     IR_LOAD,        //carrega de um array: resultado = arg1[arg2]
+    IR_LOAD_BYTE,  //leitura de 1 byte (para char)
+    IR_STORE_BYTE, //escrita de 1 byte (para char)
     
     //opcodes de controle de fluxo
     IR_LABEL,       //define um rótulo: L1:

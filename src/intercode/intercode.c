@@ -23,10 +23,11 @@ static IROperand* criar_operando_temporario();
 static IROperand* criar_operando_label_novo();
 static IROperand* criar_operando_label_nome(const char* nome);
 static void emitir(IROpcode op, IROperand* res, IROperand* arg1, IROperand* arg2);
-static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha);
-static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha);
-static IROperand* gerar_ir_call(ASTNode* no, PilhaTabelasSimbolos* pilha);
-static TokenType get_expr_static_type(ASTNode* expr_node, PilhaTabelasSimbolos* pilha);
+static void gerar_ir_no(ASTNode* no);
+static IROperand* gerar_ir_expr(ASTNode* no);
+static IROperand* gerar_ir_call(ASTNode* no);
+static TokenType get_expr_static_type(ASTNode* expr_node);
+static IROperand* copiar_operando(IROperand* op);
 
 /** @brief aloca e cria um operando genérico. */
 static IROperand* criar_operando(OperandType type) {
@@ -72,8 +73,17 @@ static IROperand* copiar_operando(IROperand* op) {
     
     //se o original era um label, criamos uma nova copia da string
     if (op->type == OPERAND_LABEL || op->type == OPERAND_STRING_LBL) {
-        copia->data.label_name = strdup(op->data.label_name);
-        copia->owns_label = 1; //a copia e dona da sua propria string
+        if (op->data.label_name) {
+            copia->data.label_name = strdup(op->data.label_name);
+            copia->owns_label = 1; //a copia e dona da sua propria string
+        }
+    }
+    
+    //se tiver conteúdo de string literal, duplicamos também
+    if (op->string_content) {
+        copia->string_content = strdup(op->string_content);
+    } else {
+        copia->string_content = NULL;
     }
     
     return copia;
@@ -99,14 +109,14 @@ static void emitir(IROpcode op, IROperand* res, IROperand* arg1, IROperand* arg2
 }
 
 /** @brief função auxiliar para gerar código para chamadas de função. */
-static IROperand* gerar_ir_call(ASTNode* no, PilhaTabelasSimbolos* pilha) {
+static IROperand* gerar_ir_call(ASTNode* no) {
     //1. processa a lista de argumentos
     ASTNode* arg_list_no = no->filho->proximo_irmao;
     int arg_count = 0;
     if (arg_list_no && arg_list_no->node_type == NODE_ARG_LIST) {
         ASTNode* arg_expr = arg_list_no->filho;
         while (arg_expr) {
-            IROperand* arg_op_original = gerar_ir_expr(arg_expr, pilha);
+            IROperand* arg_op_original = gerar_ir_expr(arg_expr);
             //cria uma copia para a instrucao param
             emitir(IR_PARAM, NULL, copiar_operando(arg_op_original), NULL);
             arg_count++;
@@ -134,7 +144,7 @@ static IROperand* gerar_ir_call(ASTNode* no, PilhaTabelasSimbolos* pilha) {
  * @brief Retorna o tipo estático de um nó de expressão.
  * (versao simplificada do 'get_expression_type' do semantic.c)
  */
-static TokenType get_expr_static_type(ASTNode* expr_node, PilhaTabelasSimbolos* pilha) {
+static TokenType get_expr_static_type(ASTNode* expr_node) {
     if (expr_node == NULL) return UNDEF;
     
     switch (expr_node->node_type) {
@@ -145,14 +155,23 @@ static TokenType get_expr_static_type(ASTNode* expr_node, PilhaTabelasSimbolos* 
         
         //tipo de uma variavel
         case NODE_ID: {
-            Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, expr_node->data.string_value);
-            if (s) return s->tipo; //o tipo (int ou char) do simbolo
+            // ALTERAÇÃO: Usa o ponteiro 'symbol' salvo na AST, em vez de buscar na pilha
+            Simbolo* s = (Simbolo*)expr_node->symbol;
+            if (s) {
+                //Se for um array de CHAR, o tipo estático para impressão deve ser STRINGCONST
+                if (s->is_array && s->tipo == CHAR) {
+                    return STRINGCONST;
+                }
+                return s->tipo; //o tipo (int ou char) do simbolo
+            }
             return UNDEF;
         }
         
         //tipo de um acesso a array (e o tipo base do array)
         case NODE_ARRAY_ACCESS: {
-             Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, expr_node->filho->data.string_value);
+             // O símbolo está no filho (o ID do array)
+             ASTNode* id = expr_node->filho;
+             Simbolo* s = (Simbolo*)id->symbol;
              if (s) return s->tipo; //ex: 'int v[10]' -> int
              return UNDEF;
         }
@@ -169,7 +188,7 @@ static TokenType get_expr_static_type(ASTNode* expr_node, PilhaTabelasSimbolos* 
 
 
 /** @brief função recursiva que percorre a ast e gera a ir para nós de expressão. */
-static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha) {
+static IROperand* gerar_ir_expr(ASTNode* no) {
     if (no == NULL) return NULL;
 
     switch (no->node_type) {
@@ -187,8 +206,6 @@ static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             return constante_char;
         }
 
-
-
         case NODE_STRING_CONST: {
             IROperand* string_label = criar_operando_label_novo(); 
             string_label->type = OPERAND_STRING_LBL;
@@ -197,15 +214,15 @@ static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             string_label->string_content = strdup(no->data.string_value);
             
             //nao mexe no data.symbol!
-            
             return string_label;
         }
 
-
         case NODE_ID: {
-            Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, no->data.string_value);
+            //acesso direto ao símbolo salvo no nó
+            Simbolo* s = (Simbolo*)no->symbol;
             if (s == NULL) {
-                fprintf(stderr, "ERRO: simbolo '%s' nao encontrado durante geracao de IR.\n", no->data.string_value);
+                //se chegou aqui sem símbolo, é erro grave do semantic, mas não deve ocorrer
+                fprintf(stderr, "ERRO FATAL (IR): simbolo '%s' nao linkado na AST.\n", no->data.string_value);
                 return NULL;
             }
             IROperand* var = criar_operando(OPERAND_SYMBOL);
@@ -214,17 +231,29 @@ static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha) {
         }
 
         case NODE_ARRAY_ACCESS: {
-            Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, no->filho->data.string_value);
+            // O símbolo está no nó filho (ID)
+            ASTNode* id_no = no->filho;
+            Simbolo* s = (Simbolo*)id_no->symbol;
+            
             IROperand* base = criar_operando(OPERAND_SYMBOL);
             base->data.symbol = s;
-            IROperand* index = gerar_ir_expr(no->filho->proximo_irmao, pilha);
+            
+            IROperand* index = gerar_ir_expr(no->filho->proximo_irmao);
             IROperand* temp = criar_operando_temporario();
-            emitir(IR_LOAD, temp, base, index);
+            
+            //se for array de CHAR, usa LOAD_BYTE ---
+            if (s && s->tipo == CHAR) {
+                emitir(IR_LOAD_BYTE, temp, base, index);
+            } else {
+                emitir(IR_LOAD, temp, base, index);
+            }
+            // -----------------------------------------------------
+            
             return temp;
         }
         case NODE_BINARY_OP: {
-            IROperand* arg1 = gerar_ir_expr(no->filho, pilha);
-            IROperand* arg2 = gerar_ir_expr(no->filho->proximo_irmao, pilha);
+            IROperand* arg1 = gerar_ir_expr(no->filho);
+            IROperand* arg2 = gerar_ir_expr(no->filho->proximo_irmao);
             IROperand* temp = criar_operando_temporario();
             IROpcode op = UNDEF;
             switch(no->data.op_type) {
@@ -243,7 +272,7 @@ static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha) {
         case NODE_CALL: {
             //uma chamada de funcao usada em uma expressao (ex: z = soma(x,y))
             //gera o codigo de chamada e retorna o temporario com o resultado.
-            return gerar_ir_call(no, pilha);
+            return gerar_ir_call(no);
         }
 
         default: return NULL;
@@ -251,7 +280,7 @@ static IROperand* gerar_ir_expr(ASTNode* no, PilhaTabelasSimbolos* pilha) {
 }
 
 /** @brief função recursiva principal que percorre a ast e gera a ir para instruções. */
-static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
+static void gerar_ir_no(ASTNode* no) {
     if (no == NULL) return;
 
     switch (no->node_type) {
@@ -260,7 +289,7 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             
             ASTNode* filho = no->filho;
             while (filho != NULL) {
-                gerar_ir_no(filho, pilha);
+                gerar_ir_no(filho);
                 filho = filho->proximo_irmao;
             }
             
@@ -273,7 +302,7 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             while(corpo_funcao && corpo_funcao->node_type != NODE_BLOCK) {
                 corpo_funcao = corpo_funcao->proximo_irmao;
             }
-            gerar_ir_no(corpo_funcao, pilha);
+            gerar_ir_no(corpo_funcao);
             break;
         }
         case NODE_VAR_DECL: {
@@ -282,7 +311,7 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
                 assign_no = assign_no->proximo_irmao;
             }
             if (assign_no) {
-                gerar_ir_no(assign_no, pilha);
+                gerar_ir_no(assign_no);
             }
             break;
         }
@@ -290,28 +319,55 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             ASTNode* lado_esquerdo = no->filho;
             ASTNode* lado_direito = lado_esquerdo->proximo_irmao;
             
+            // --- DETECÇÃO DE ATRIBUIÇÃO DE STRING (IR_STRCPY) ---
+            TokenType t_esq = get_expr_static_type(lado_esquerdo);
+            TokenType t_dir = get_expr_static_type(lado_direito);
+
+            if (t_esq == STRINGCONST && t_dir == STRINGCONST) {
+                // Caso Especial: nome = "string";
+                IROperand* src = gerar_ir_expr(lado_direito); // Gera o label da string
+                
+                Simbolo* s = (Simbolo*)lado_esquerdo->symbol; // Pega do nó ID
+                IROperand* dest = criar_operando(OPERAND_SYMBOL);
+                dest->data.symbol = s;
+                
+                // Emite nova instrução IR_STRCPY (destino, origem)
+                emitir(IR_STRCPY, dest, copiar_operando(src), NULL);
+                
+                break; // Sai do case, pois já tratamos
+            }
+            // ----------------------------------------------------
+            
             //src e o ponteiro original (ex: t0)
-            IROperand* src = gerar_ir_expr(lado_direito, pilha); 
+            IROperand* src = gerar_ir_expr(lado_direito); 
 
             if (lado_esquerdo->node_type == NODE_ID) {
-                Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, lado_esquerdo->data.string_value);
+                Simbolo* s = (Simbolo*)lado_esquerdo->symbol;
                 IROperand* dest = criar_operando(OPERAND_SYMBOL);
                 dest->data.symbol = s;
                 //usa uma copia de 'src' (t0) para esta instrucao
                 emitir(IR_ASSIGN, dest, copiar_operando(src), NULL); 
             } 
             else if (lado_esquerdo->node_type == NODE_ARRAY_ACCESS) {
-                Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, lado_esquerdo->filho->data.string_value);
+                ASTNode* id = lado_esquerdo->filho;
+                Simbolo* s = (Simbolo*)id->symbol;
+                
                 IROperand* base = criar_operando(OPERAND_SYMBOL);
                 base->data.symbol = s;
-                IROperand* index = gerar_ir_expr(lado_esquerdo->filho->proximo_irmao, pilha);
-                //usa uma copia de 'src' (t0) para esta instrucao
-                emitir(IR_STORE, base, copiar_operando(src), index); 
+                IROperand* index = gerar_ir_expr(lado_esquerdo->filho->proximo_irmao);
+                
+                // --- CORRECAO: Se for CHAR, usa STORE_BYTE ---
+                if (s && s->tipo == CHAR) {
+                    emitir(IR_STORE_BYTE, base, copiar_operando(src), index); 
+                } else {
+                    emitir(IR_STORE, base, copiar_operando(src), index); 
+                }
+                // ---------------------------------------------
             }
             break;
         }
         case NODE_RETURN: {
-            IROperand* ret_val = gerar_ir_expr(no->filho, pilha);
+            IROperand* ret_val = gerar_ir_expr(no->filho);
             //usa uma copia do valor de retorno
             emitir(IR_RETURN, NULL, copiar_operando(ret_val), NULL);
             break;
@@ -324,17 +380,17 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             IROperand* label_else = criar_operando_label_novo();
             IROperand* label_fim_if = criar_operando_label_novo();
             
-            IROperand* cond_result = gerar_ir_expr(cond_no, pilha);
+            IROperand* cond_result = gerar_ir_expr(cond_no);
             
             //usa uma copia do resultado da condicao
             emitir(IR_IF_FALSE, copiar_operando(label_else), copiar_operando(cond_result), NULL);
             
-            gerar_ir_no(then_no, pilha);
+            gerar_ir_no(then_no);
             emitir(IR_GOTO, copiar_operando(label_fim_if), NULL, NULL);
 
             emitir(IR_LABEL, label_else, NULL, NULL); //usa o original
             if (else_no) {
-                gerar_ir_no(else_no, pilha);
+                gerar_ir_no(else_no);
             }
             
             emitir(IR_LABEL, label_fim_if, NULL, NULL); //usa o original
@@ -349,17 +405,17 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             IROperand* label_inicio_loop = criar_operando_label_novo();
             IROperand* label_fim_loop = criar_operando_label_novo();
 
-            gerar_ir_no(init_no, pilha);
+            gerar_ir_no(init_no);
             emitir(IR_LABEL, label_inicio_loop, NULL, NULL); //usa o original
 
             if (cond_no && cond_no->node_type != NODE_UNDEFINED) {
-                IROperand* cond_result = gerar_ir_expr(cond_no, pilha);
+                IROperand* cond_result = gerar_ir_expr(cond_no);
                 //usa copias
                 emitir(IR_IF_FALSE, copiar_operando(label_fim_loop), copiar_operando(cond_result), NULL);
             }
 
-            gerar_ir_no(body_no, pilha);
-            gerar_ir_no(incr_no, pilha);
+            gerar_ir_no(body_no);
+            gerar_ir_no(incr_no);
 
             emitir(IR_GOTO, copiar_operando(label_inicio_loop), NULL, NULL); //usa copia
             emitir(IR_LABEL, label_fim_loop, NULL, NULL); //usa o original
@@ -371,10 +427,10 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
             if (arg_node == NULL) break; //'print()' sem argumento, nao faz nada
 
             //1. descobre o tipo estatico do argumento (int, char, etc.)
-            TokenType arg_type = get_expr_static_type(arg_node, pilha);
+            TokenType arg_type = get_expr_static_type(arg_node);
             
             //2. gera a ir para o argumento (ex: z, 'a', "ola")
-            IROperand* arg_op = gerar_ir_expr(arg_node, pilha);
+            IROperand* arg_op = gerar_ir_expr(arg_node);
             if (arg_op == NULL) break; //falha ao gerar expressao
 
             //3. emite o opcode de print correto baseado no tipo
@@ -390,9 +446,9 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
                     emitir(IR_PRINT_CHAR, NULL, copiar_operando(arg_op), NULL);
                     break;
                     
-                case STRINGCONST: //se for um literal string
-                    //nao copia, pois 'arg_op' e um label novo e unico
-                    emitir(IR_PRINT_STRING, NULL, arg_op, NULL);
+                case STRINGCONST: 
+                    //Usamos copiar_operando para suportar tanto literais quanto variáveis
+                    emitir(IR_PRINT_STRING, NULL, copiar_operando(arg_op), NULL);
                     break;
                     
                 default:
@@ -405,7 +461,7 @@ static void gerar_ir_no(ASTNode* no, PilhaTabelasSimbolos* pilha) {
         case NODE_CALL: {
             //este e um 'call' onde o valor de retorno nao e usado.
             //(ex: uma funcao que so tem efeitos colaterais)
-            gerar_ir_call(no, pilha);
+            gerar_ir_call(no);
             break;
         }
 
@@ -419,6 +475,9 @@ IR_Instruction* gerar_codigo_intermediario(ASTNode* raiz, PilhaTabelasSimbolos* 
     temp_counter = 0;
     label_counter = 0;
     ir_list_head = ir_list_tail = NULL;
-    gerar_ir_no(raiz, pilha);
+    
+
+    gerar_ir_no(raiz);
+    
     return ir_list_head;
 }

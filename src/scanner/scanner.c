@@ -134,20 +134,37 @@ Token proximo_token() {
         return token;
     }
 
-    //constantes de caractere
+    //constantes de caractere (ATUALIZADO PARA SUPORTAR ESCAPE \0, \n, etc)
     if (c == '\'') {
+        char char_val = 0;
         c = prox_char();
-        if (c != '\'' && c != '\n' && c != EOF) { //verifica se não é vazio, nova linha ou fim
-            token.lexema[0] = c;
-            token.lexema[1] = '\0';
-            if (prox_char() == '\'') { //verifica se fecha aspas
-                token.tipo = CHARCONST;
-                return token;
-            }
+        
+        if (c == '\\') {
+            // Sequência de escape detectada
+            char next = prox_char();
+            if (next == '0') char_val = '\0';
+            else if (next == 'n') char_val = '\n';
+            else if (next == 't') char_val = '\t';
+            else if (next == '\\') char_val = '\\';
+            else if (next == '\'') char_val = '\'';
+            else char_val = next; // default
+        } else {
+            // Caractere normal
+            char_val = c;
         }
-        //se chegou aqui, o char é mal formado
-        strcpy(token.lexema, "'");
-        return token; //retorna UNDEF
+
+        // Verifica fechamento
+        if (prox_char() == '\'') {
+            token.tipo = CHARCONST;
+            token.lexema[0] = char_val;
+            token.lexema[1] = '\0';
+            return token;
+        }
+        
+        // Se chegou aqui, é erro (não fechou aspas)
+        strcpy(token.lexema, "'"); 
+        token.tipo = UNDEF;
+        return token;
     }
 
     //reconhecer strings
@@ -213,6 +230,29 @@ Token proximo_token() {
                 ungetc(next_c, arquivo_fonte);
                 token.tipo = MINUS;
                 strcpy(token.lexema, "-");
+            }
+            break;
+        // suporte a operadores lógicos && e ||
+        case '&':
+            next_c = prox_char();
+            if (next_c == '&') { 
+                token.tipo = AND; 
+                strcpy(token.lexema, "&&"); 
+            } else { 
+                ungetc(next_c, arquivo_fonte); 
+                token.tipo = UNDEF; 
+                token.lexema[0] = '&'; token.lexema[1] = '\0';
+            }
+            break;
+        case '|':
+            next_c = prox_char();
+            if (next_c == '|') { 
+                token.tipo = OR; 
+                strcpy(token.lexema, "||"); 
+            } else { 
+                ungetc(next_c, arquivo_fonte); 
+                token.tipo = UNDEF;
+                token.lexema[0] = '|'; token.lexema[1] = '\0';
             }
             break;
         case '+': strcpy(token.lexema, "+"); token.tipo = PLUS; break;

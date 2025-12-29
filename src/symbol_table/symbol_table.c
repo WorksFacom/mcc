@@ -78,17 +78,17 @@ void desempilhar_tabela(PilhaTabelasSimbolos *pilha) {
  * @param is_function flag que indica se é uma função.
  * @param is_array flag que indica se é um array.
  * @param array_size o tamanho do array (se aplicável).
- * @return 0 em caso de sucesso, -1 em caso de erro.
+ * @return ponteiro para o símbolo criado em caso de sucesso, NULL em caso de erro.
  */
-int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size, int is_parameter) {
+Simbolo* adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType tipo, int is_function, int is_array, int array_size, int is_parameter) {
     if (pilha->topo < 0) {
         printf("Erro: Nenhuma tabela de símbolos disponível\n");
-        return -1;
+        return NULL; 
     }
     TabelaSimbolos *tabela = pilha->tabelas[pilha->topo];
     if (tabela->tamanho >= MAX_SIMBOLOS) {
         printf("Erro: Tabela de símbolos cheia\n");
-        return -1;
+        return NULL; 
     }
     Simbolo *s = &tabela->simbolos[tabela->tamanho];
     strncpy(s->nome, nome, 100);
@@ -103,8 +103,10 @@ int adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenType t
     s->memory_offset = 0; //será calculado pelo semantic.c
     
     tabela->tamanho++;
-    return 0;
+    
+    return s; 
 }
+
 /**
  * @brief busca por um símbolo apenas na tabela do escopo atual (topo da pilha).
  * @param pilha a pilha de tabelas de símbolos.
@@ -141,4 +143,47 @@ Simbolo* buscar_simbolo_em_todos_escopos(PilhaTabelasSimbolos *pilha, const char
         }
     }
     return NULL;
+}
+
+/**
+ * @brief Gera uma representação visual formatada da tabela de símbolos.
+ * @param t Ponteiro para a tabela a ser impressa.
+ * @param nome_escopo Uma string descrevendo o escopo.
+ * @param out Ponteiro para o arquivo onde será escrito (arquivo ou stdout).
+ */
+void imprimir_tabela(TabelaSimbolos* t, const char* nome_escopo, FILE* out) {
+    if (!t || !out) return;
+
+    fprintf(out, "\n================================================================================\n");
+    fprintf(out, "ESCOPO: %s\n", nome_escopo);
+    fprintf(out, "================================================================================\n");
+    fprintf(out, "%-20s | %-10s | %-10s | %-10s | %-8s | %-6s\n", 
+            "NOME", "TIPO", "CATEGORIA", "ARRAY?", "TAMANHO", "OFFSET");
+    fprintf(out, "---------------------+------------+------------+------------+----------+--------\n");
+
+    for (int i = 0; i < t->tamanho; i++) {
+        Simbolo* s = &t->simbolos[i];
+        
+        // Converte TokenType para string
+        char str_tipo[10];
+        if (s->tipo == INT) strcpy(str_tipo, "INT");
+        else if (s->tipo == CHAR) strcpy(str_tipo, "CHAR");
+        else strcpy(str_tipo, "OUTRO");
+
+        // Define Categoria
+        char str_cat[15];
+        if (s->is_function) strcpy(str_cat, "FUNCAO");
+        else if (s->is_parameter) strcpy(str_cat, "PARAMETRO");
+        else strcpy(str_cat, "VAR LOCAL");
+
+        // Formata linha
+        fprintf(out, "%-20s | %-10s | %-10s | %-10s | %-8d | %-6d\n",
+                s->nome,
+                str_tipo,
+                str_cat,
+                s->is_array ? "SIM" : "NAO",
+                s->is_array ? s->array_size : 0,
+                s->memory_offset);
+    }
+    fprintf(out, "--------------------------------------------------------------------------------\n");
 }

@@ -166,7 +166,8 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
     //todos os literais de string (ex: print("ola")) e defini-los.
     IR_Instruction* instr_scan = ir_head;
     while (instr_scan != NULL) {
-        if (instr_scan->opcode == IR_PRINT_STRING && 
+        // Verifica se é PRINT ou STRCPY (pois ambos usam literais)
+        if ((instr_scan->opcode == IR_PRINT_STRING || instr_scan->opcode == IR_STRCPY) && 
             instr_scan->arg1 != NULL && 
             instr_scan->arg1->type == OPERAND_STRING_LBL) 
         {
@@ -246,7 +247,7 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
 
-            //grupo 2: divisão e módulo (requerem %eax e %edx)
+            //grupo 2: divisão e módulo (CORRIGIDO PARA SUPORTAR CONSTANTES)
             case IR_DIV:
             case IR_MOD:
                 //passo 1: carrega o dividendo (arg1) em %eax
@@ -255,9 +256,10 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 //passo 2: estende o sinal de %eax para %edx (necessário para idivl)
                 asm_instr("cdq");
                 
-                //passo 3: divide edx:eax pelo divisor (arg2)
-                //o divisor não pode ser %eax ou %edx
-                asm_instr("idivl %s", get_operand_asm(instr->arg2));
+                //passo 3: Carrega o divisor em %ecx
+                //CORREÇÃO: idivl não aceita imediato ($10). Movemos para reg primeiro.
+                asm_instr("movl %s, %%ecx", get_operand_asm(instr->arg2));
+                asm_instr("idivl %%ecx");
                 
                 //passo 4: armazena o resultado
                 if (instr->opcode == IR_DIV) {
@@ -346,7 +348,7 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 asm_instr("jmp %s", get_operand_asm(instr->result));
                 break;
             
-/**
+            /**
              * @brief traduz a instrução ir_param (passagem de parâmetro).
              * @detalhes acumula parâmetros em um buffer para empilhar na ordem
              * reversa durante o ir_call.
@@ -389,36 +391,19 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
                 }
                 break;
 
+            // --- INSERÇÃO DOS PRINTS ---
+            
             case IR_PRINT_INT: {
-                //versão linux/gcc (system v amd64 abi):
-                //arg 1 (formato) vai em %rdi
-                //arg 2 (valor) vai em %rsi
-                
-                //1. carrega o formato em %rdi (primeiro argumento)
                 asm_instr("leaq .L.str.int(%%rip), %%rdi");
-                
-                //2. carrega o valor em %esi (segundo argumento - parte baixa de %rsi)
                 asm_instr("movl %s, %%esi", get_operand_asm(instr->arg1));
-                
-                //3. gcc exige %rax = 0 para printf (indica 0 args de ponto flutuante)
-                asm_instr("xorl %%eax, %%eax");
-                
-                //4. alinha a pilha para 16 bytes (system v exige isso)
-                asm_instr("subq $8, %%rsp");
-                
-                //5. chama printf
+                asm_instr("xorl %%eax, %%eax"); // %rax = 0 para printf
+                asm_instr("subq $8, %%rsp");    // alinha pilha 16 bytes
                 asm_instr("call printf");
-                
-                //6. restaura a pilha
-                asm_instr("addq $8, %%rsp");
+                asm_instr("addq $8, %%rsp");    // restaura pilha
                 break;
             }
 
             case IR_PRINT_CHAR: {
-                //versão linux/gcc:
-                //arg 1 (formato) em %rdi
-                //arg 2 (char) em %esi
-                
                 asm_instr("leaq .L.str.char(%%rip), %%rdi");
                 asm_instr("movl %s, %%esi", get_operand_asm(instr->arg1));
                 asm_instr("xorl %%eax, %%eax");
@@ -429,18 +414,27 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
             }
 
             case IR_PRINT_STRING: {
-                //versão linux/gcc:
-                //arg 1 (formato "%s\n") em %rdi
-                //arg 2 (ponteiro para string) em %rsi
-                
                 asm_instr("leaq .L.str.str(%%rip), %%rdi");
-                asm_instr("leaq %s(%%rip), %%rsi", get_operand_asm(instr->arg1));
+                if (instr->arg1->type == OPERAND_SYMBOL) {
+                     asm_instr("leaq %s, %%rsi", get_operand_asm(instr->arg1));
+                } else {
+                     asm_instr("leaq %s(%%rip), %%rsi", get_operand_asm(instr->arg1));
+                }
                 asm_instr("xorl %%eax, %%eax");
                 asm_instr("subq $8, %%rsp");
                 asm_instr("call printf");
                 asm_instr("addq $8, %%rsp");
                 break;
             }
+
+            // --- IMPLEMENTAÇÃO DO STRCPY (NOVA INSTRUÇÃO) ---
+            case IR_STRCPY: {
+                asm_instr("leaq %s, %%rdi", get_operand_asm(instr->result));
+                asm_instr("leaq %s(%%rip), %%rsi", get_operand_asm(instr->arg1));
+                asm_instr("call strcpy");
+                break;
+            }
+            // ------------------------------------------------
 
             /**
              * @brief traduz a instrução ir_return.
@@ -449,52 +443,57 @@ int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const c
              */
             case IR_RETURN:
                 if(instr->arg1) {
-                    //passo 1: move o valor de retorno para %eax (convenção de chamada)
                     asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
                 }
-                //passo 2: gera o epílogo da função
                 asm_gen_epilogue();
                 break;
 
             /**
-             * @brief traduz a instrução ir_load (leitura de array).
-             * @detalhes traduz `result := load arg1[arg2]` (ex: t0 := v[i]).
-             * usa o endereçamento indexado do x86-64: [base + indice * escala].
-             * %rax armazena o endereço base do array (arg1).
-             * %ebx armazena o índice (arg2).
-             * %ecx armazena o valor carregado da memória.
+             * @brief traduz a instrução ir_load (leitura de array de inteiros).
+             * @detalhes t0 = v[i] (escala 4 bytes)
              */
             case IR_LOAD:
-                //passo 1: carrega o endereço base do array (arg1) em %rax
-                //(leaq = load effective address)
                 asm_instr("leaq %s, %%rax", get_operand_asm(instr->arg1));
-                //passo 2: carrega o índice (arg2) em %ebx
                 asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                //passo 3: carrega o valor do endereço [base + indice*4] em %ecx
-                //a sintaxe at&t para isso é: offset(base, indice, escala)
-                //usamos (%rax, %rbx, 4) -> %rax=base, %rbx=indice, 4=escala(bytes)
                 asm_instr("movl (%%rax, %%rbx, 4), %%ecx");
-                //passo 4: armazena o valor (em %ecx) no destino (result)
                 asm_instr("movl %%ecx, %s", get_operand_asm(instr->result));
                 break;
 
+            // --- NOVO: LEITURA DE BYTE (CHAR) ---
+            case IR_LOAD_BYTE: 
+                asm_instr("leaq %s, %%rax", get_operand_asm(instr->arg1));
+                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
+                
+                // movzbl: move byte com extensão de zero
+                // Escala 1 para chars
+                asm_instr("movzbl (%%rax, %%rbx, 1), %%ecx");
+                
+                asm_instr("movl %%ecx, %s", get_operand_asm(instr->result));
+                break;
+            // ------------------------------------
+
             /**
-             * @brief traduz a instrução ir_store (escrita em array).
-             * @detalhes traduz `store result[arg2] := arg1` (ex: v[i] := x).
-             * %rax armazena o endereço base do array (result).
-             * %ebx armazena o índice (arg2).
-             * %ecx armazena o valor a ser guardado (arg1).
+             * @brief traduz a instrução ir_store (escrita em array de inteiros).
+             * @detalhes v[i] = t0 (escala 4 bytes)
              */
             case IR_STORE:
-                //passo 1: carrega o endereço base do array (result) em %rax
                 asm_instr("leaq %s, %%rax", get_operand_asm(instr->result));
-                //passo 2: carrega o índice (arg2) em %ebx
                 asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                //passo 3: carrega o valor a ser armazenado (arg1) em %ecx
                 asm_instr("movl %s, %%ecx", get_operand_asm(instr->arg1));
-                //passo 4: armazena o valor (em %ecx) no endereço [base + indice*4]
                 asm_instr("movl %%ecx, (%%rax, %%rbx, 4)");
                 break;
+
+            // --- NOVO: ESCRITA DE BYTE (CHAR) ---
+            case IR_STORE_BYTE:
+                asm_instr("leaq %s, %%rax", get_operand_asm(instr->result));
+                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
+                asm_instr("movl %s, %%ecx", get_operand_asm(instr->arg1));
+                
+                // movb: escreve apenas o byte inferior (%cl)
+                // Escala 1
+                asm_instr("movb %%cl, (%%rax, %%rbx, 1)");
+                break;
+            // ------------------------------------
 
             default:
                 asm_instr("# opcode da ir nao implementado: %d", instr->opcode);
