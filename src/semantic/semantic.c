@@ -1,511 +1,523 @@
+/**
+ * @file semantic.c
+ * @brief implementação do analisador semântico em múltiplas passagens.
+ *
+ * a primeira passagem registra todas as funções. a segunda valida corpos,
+ * escopos, tipos e retornos, além de atribuir offsets únicos por função.
+ */
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 #include "semantic.h"
 
-/**
- * @file semantic.c
- * @brief implementação do analisador semântico.
- *
- * este módulo percorre a árvore sintática abstrata (ast) para realizar
- * checagens de tipo, de declaração e de escopo. ele utiliza a
- * tabela de símbolos e calcula os deslocamentos de memória para o back-end.
- * Além disso, gera uma representação visual da tabela de símbolos.
- */
+typedef struct {
+    PilhaTabelasSimbolos* pilha;
+    Simbolo* funcao;
+    int bytes_locais;
+    int proximo_parametro;
+} ContextoSemantico;
 
-// Variáveis para controle da saída visual da tabela de símbolos
 static FILE* arquivo_simbolos = NULL;
 static bool modo_verbose = false;
 
-//protótipos de funções estáticas
-static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escopo_funcao_atual, bool is_param_decl);
-static TokenType get_expression_type(ASTNode* expr_node, PilhaTabelasSimbolos* pilha, int* string_len);
-static int get_symbol_size(Simbolo* s);
-static void calcular_offsets(TabelaSimbolos* tabela);
+//================================================================================
+// DIAGNÓSTICOS E TAMANHOS
+//================================================================================
 
-/** @brief função auxiliar para reportar erros semânticos e encerrar a compilação. */
-static void erro_semantico(const char* msg, int linha) {
-    fprintf(stderr, "Erro Semantico na linha %d: %s\n", linha, msg);
+/** @brief reporta um erro semântico e encerra a compilação. */
+static void erro_semantico(const char* mensagem, int linha) {
+    fprintf(stderr, "Erro Semantico na linha %d: %s\n", linha, mensagem);
     exit(EXIT_FAILURE);
 }
 
-/**
- * @brief calcula o tamanho em bytes de um símbolo para alocação na pilha.
- * @param s o símbolo a ser medido.
- * @return o tamanho em bytes do símbolo.
- */
-static int get_symbol_size(Simbolo* s) {
-    //se for CHAR, o tamanho base é 1 byte. Se for INT, é 4 bytes.
-    int tipo_base_size = (s->tipo == CHAR) ? 1 : 4;
-    
-    if (s->is_array) {
-        return s->array_size * tipo_base_size;
-    }
-    return tipo_base_size;
+/** @brief alinha um deslocamento para o próximo múltiplo de quatro. */
+static int alinhar_4(int valor) {
+    return (valor + 3) & ~3;
 }
 
-/**
- * @brief percorre uma tabela de um escopo e calcula os offsets de memória.
- *
- * esta função é chamada ao final da análise de um escopo de função.
- * ela faz duas passagens:
- * 1. Calcula offsets POSITIVOS para parâmetros (ex: [rbp+16], [rbp+24]).
- * 2. Calcula offsets NEGATIVOS para variáveis locais (ex: [rbp-4], [rbp-8]).
- * @param tabela a tabela de símbolos do escopo da função.
- */
-static void calcular_offsets(TabelaSimbolos* tabela) {
-    //padrão da convenção de chamada 'System V AMD64 ABI' (usada pelo Linux/macOS)
-    //os primeiros 6 argumentos inteiros/ponteiros vão para registradores.
-    //argumentos adicionais e parâmetros na stack começam em [rbp+16].
-    //vamos usar +16 para o primeiro parâmetro na pilha para simplificar.
-    //(em uma implementação real, os 6 primeiros seriam tratados de forma diferente)
-    
-    //começamos o offset dos parâmetros em +16
-    int param_offset = 16; 
-    int local_offset = 0;
+/** @brief alinha o frame para chamadas que exigem múltiplos de 16 bytes. */
+static int alinhar_16(int valor) {
+    return (valor + 15) & ~15;
+}
 
-    //passagem 1: calcular offsets de parâmetros
-    //(iteramos na ordem de declaração para que o primeiro parâmetro tenha o menor offset)
-    for (int i = 0; i < tabela->tamanho; i++) {
-        Simbolo* s = &tabela->simbolos[i];
-        if (s->is_function) continue; //ignora sub-funções
-
-        if (s->is_parameter) {
-            s->memory_offset = param_offset;
-            //assumindo que cada parâmetro ocupa 8 bytes na pilha (padrão 64-bit)
-            param_offset += 8; 
-        }
+/** @brief calcula o tamanho de armazenamento de um símbolo local. */
+static int tamanho_simbolo(const Simbolo* simbolo) {
+    if (simbolo->is_array) {
+        int tamanho_elemento = simbolo->tipo == CHAR ? 1 : 4;
+        return simbolo->array_size * tamanho_elemento;
     }
-    
-    //passagem 2: calcular offsets de variáveis locais
-    //(iteramos na ordem de declaração)
-    for (int i = 0; i < tabela->tamanho; i++) {
-        Simbolo* s = &tabela->simbolos[i];
-        if (s->is_function) continue; //ignora sub-funções
 
-        if (!s->is_parameter) { //se for uma variável local
-            int tamanho_simbolo = get_symbol_size(s);
-            local_offset -= tamanho_simbolo; //pilha cresce para baixo
-            s->memory_offset = local_offset;
-        }
+    //escalares int e char usam quatro bytes, conforme o modelo didático do livro
+    return 4;
+}
+
+/** @brief imprime uma tabela no arquivo e, opcionalmente, no terminal. */
+static void registrar_tabela(TabelaSimbolos* tabela, const char* titulo) {
+    if (arquivo_simbolos != NULL) {
+        imprimir_tabela(tabela, titulo, arquivo_simbolos);
+    }
+    if (modo_verbose) {
+        imprimir_tabela(tabela, titulo, stdout);
     }
 }
 
+//================================================================================
+// PRIMEIRA PASSAGEM: DECLARAÇÕES GLOBAIS
+//================================================================================
 
-/**
- * @brief determina o tipo de uma expressão e, se for uma string, seu tamanho.
- * @param expr_node o nó raiz da expressão a ser analisada.
- * @param pilha a pilha da tabela de símbolos para consulta de tipos.
- * @param string_len ponteiro para um inteiro que receberá o tamanho da string (se aplicável).
- * @return o TokenType correspondente ao tipo da expressão.
- */
-static TokenType get_expression_type(ASTNode* expr_node, PilhaTabelasSimbolos* pilha, int* string_len) {
-    if (expr_node == NULL) return UNDEF;
-    
-    if (string_len) *string_len = 0;
+/** @brief registra todas as assinaturas antes de analisar qualquer corpo. */
+static void registrar_funcoes(ASTNode* raiz, PilhaTabelasSimbolos* pilha) {
+    for (ASTNode* funcao = raiz->filho; funcao != NULL; funcao = funcao->proximo_irmao) {
+        if (funcao->node_type != NODE_FUNCTION_DEF) continue;
 
-    switch (expr_node->node_type) {
-        case NODE_INTEGER_CONST: return INT;
-        case NODE_CHAR_CONST: return CHAR;
+        ASTNode* tipo = funcao->filho;
+        ASTNode* id = tipo->proximo_irmao;
+        if (buscar_simbolo_no_escopo_atual(pilha, id->data.string_value) != NULL) {
+            char mensagem[256];
+            snprintf(mensagem, sizeof(mensagem), "Funcao '%s' ja foi declarada.", id->data.string_value);
+            erro_semantico(mensagem, id->linha);
+        }
+
+        Simbolo* simbolo = adicionar_simbolo(pilha, id->data.string_value,
+                                              tipo->data.op_type, 1, 0, 0, 0);
+        if (simbolo == NULL) {
+            erro_semantico("Nao foi possivel registrar a funcao.", id->linha);
+        }
+        id->symbol = simbolo;
+
+        ASTNode* parametros = id->proximo_irmao;
+        if (parametros != NULL && parametros->node_type == NODE_PARAM_LIST) {
+            for (ASTNode* parametro = parametros->filho;
+                 parametro != NULL;
+                 parametro = parametro->proximo_irmao) {
+                if (simbolo->num_parametros >= MAX_PARAMETROS) {
+                    erro_semantico("Numero maximo de parametros excedido.", parametro->linha);
+                }
+                simbolo->param_tipos[simbolo->num_parametros++] = parametro->filho->data.op_type;
+            }
+        }
+    }
+
+    Simbolo* principal = buscar_simbolo_no_escopo_atual(pilha, "main");
+    if (principal == NULL || !principal->is_function) {
+        erro_semantico("Programa deve declarar a funcao main.", 0);
+    }
+    if (principal->tipo != INT || principal->num_parametros != 0) {
+        erro_semantico("Funcao main deve possuir retorno int e nenhum parametro.", 0);
+    }
+}
+
+//================================================================================
+// SEGUNDA PASSAGEM: TIPOS, ESCOPOS E LAYOUT
+//================================================================================
+
+static TokenType obter_tipo_expressao(ASTNode* expressao, ContextoSemantico* contexto, int* tamanho_string);
+static void analisar_instrucao(ASTNode* no, ContextoSemantico* contexto);
+
+/** @brief associa um identificador ao símbolo visível no ponto de uso. */
+static Simbolo* resolver_simbolo(ASTNode* id, ContextoSemantico* contexto) {
+    Simbolo* simbolo = buscar_simbolo_em_todos_escopos(contexto->pilha, id->data.string_value);
+    if (simbolo == NULL) {
+        char mensagem[256];
+        snprintf(mensagem, sizeof(mensagem), "Identificador '%s' nao foi declarado.", id->data.string_value);
+        erro_semantico(mensagem, id->linha);
+    }
+    id->symbol = simbolo;
+    return simbolo;
+}
+
+/** @brief valida uma chamada e anota seu tipo de retorno. */
+static TokenType obter_tipo_chamada(ASTNode* chamada, ContextoSemantico* contexto) {
+    ASTNode* id = chamada->filho;
+    Simbolo* funcao = resolver_simbolo(id, contexto);
+    if (!funcao->is_function) {
+        char mensagem[256];
+        snprintf(mensagem, sizeof(mensagem), "'%s' nao e uma funcao.", funcao->nome);
+        erro_semantico(mensagem, id->linha);
+    }
+
+    ASTNode* lista = id->proximo_irmao;
+    ASTNode* argumento = lista != NULL ? lista->filho : NULL;
+    int quantidade = 0;
+    while (argumento != NULL) {
+        if (quantidade >= funcao->num_parametros) {
+            erro_semantico("Numero excessivo de argumentos na chamada da funcao.", argumento->linha);
+        }
+        TokenType tipo = obter_tipo_expressao(argumento, contexto, NULL);
+        if (tipo != funcao->param_tipos[quantidade]) {
+            erro_semantico("Tipo de argumento incompativel na chamada da funcao.", argumento->linha);
+        }
+        quantidade++;
+        argumento = argumento->proximo_irmao;
+    }
+
+    if (quantidade != funcao->num_parametros) {
+        erro_semantico("Numero insuficiente de argumentos na chamada da funcao.", chamada->linha);
+    }
+
+    chamada->inferred_type = funcao->tipo;
+    return funcao->tipo;
+}
+
+/** @brief determina e anota o tipo de uma expressão validada. */
+static TokenType obter_tipo_expressao(ASTNode* expressao, ContextoSemantico* contexto, int* tamanho_string) {
+    if (expressao == NULL) return UNDEF;
+    if (tamanho_string != NULL) *tamanho_string = 0;
+
+    switch (expressao->node_type) {
+        case NODE_INTEGER_CONST:
+            expressao->inferred_type = INT;
+            return INT;
+
+        case NODE_CHAR_CONST:
+            expressao->inferred_type = CHAR;
+            return CHAR;
+
         case NODE_STRING_CONST:
-            if (string_len) {
-                *string_len = strlen(expr_node->data.string_value) + 1;
+            expressao->inferred_type = STRINGCONST;
+            if (tamanho_string != NULL) {
+                size_t tamanho = strlen(expressao->data.string_value) + 1;
+                if (tamanho > INT_MAX) {
+                    erro_semantico("Literal de string excede o limite suportado.", expressao->linha);
+                }
+                *tamanho_string = (int)tamanho;
             }
             return STRINGCONST;
+
         case NODE_ID: {
-            Simbolo* simbolo = buscar_simbolo_em_todos_escopos(pilha, expr_node->data.string_value);
-            if (simbolo == NULL) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Variavel '%s' nao foi declarada.", expr_node->data.string_value);
-                erro_semantico(msg, expr_node->linha);
-            }
-            
-            // --- LINKAGEM: SALVA O PONTEIRO DO SIMBOLO NO NO DA AST ---
-            expr_node->symbol = simbolo;
-            // ----------------------------------------------------------
-            
-            if (simbolo->is_array) {
-                // Se for array de CHAR, permitimos uso como variável simples (ponteiro/string)
-                if (simbolo->tipo == CHAR) {
-                    return STRINGCONST; 
-                } 
-                // Se for array de INT (ou outro), mantemos a proibição
-                else {
-                    char msg[200];
-                    snprintf(msg, sizeof(msg), "O array '%s' (tipo int) nao pode ser usado sem indice (apenas arrays char/strings).", simbolo->nome);
-                    erro_semantico(msg, expr_node->linha);
-                }
-            }
-            
+            Simbolo* simbolo = resolver_simbolo(expressao, contexto);
             if (simbolo->is_function) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "'%s' e uma funcao e nao pode ser usada como variavel.", simbolo->nome);
-                erro_semantico(msg, expr_node->linha);
+                char mensagem[256];
+                snprintf(mensagem, sizeof(mensagem), "'%s' e uma funcao e nao pode ser usada como variavel.", simbolo->nome);
+                erro_semantico(mensagem, expressao->linha);
             }
-            return simbolo->tipo;
-        }
-        case NODE_ARRAY_ACCESS: {
-            ASTNode* id_no = expr_node->filho;
-            Simbolo* simbolo = buscar_simbolo_em_todos_escopos(pilha, id_no->data.string_value);
-            if (simbolo == NULL) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Array '%s' nao foi declarado.", id_no->data.string_value);
-                erro_semantico(msg, id_no->linha);
-            }
-            
-            // --- LINKAGEM: SALVA O SIMBOLO NO FILHO (ID) ---
-            id_no->symbol = simbolo;
-            // -----------------------------------------------
-
-            if (!simbolo->is_array) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Variavel '%s' nao e um array e nao pode ser indexada.", simbolo->nome);
-                erro_semantico(msg, id_no->linha);
-            }
-            
-            // Recursão para validar o índice (e linkar símbolos dentro dele)
-            if (get_expression_type(id_no->proximo_irmao, pilha, NULL) != INT) {
-                erro_semantico("Indice de array deve ser do tipo inteiro.", expr_node->linha);
-            }
-            
-            return simbolo->tipo;
-        }
-        case NODE_BINARY_OP: {
-            TokenType tipo_esq = get_expression_type(expr_node->filho, pilha, NULL);
-            TokenType tipo_dir = get_expression_type(expr_node->filho->proximo_irmao, pilha, NULL);
-            if (tipo_esq == INT && tipo_dir == INT) return INT;
-            erro_semantico("Tipos incompativeis em operacao binaria (esperado INT).", expr_node->linha);
-            return UNDEF;
-        }
-        case NODE_CALL: {
-            ASTNode* id_no = expr_node->filho;
-            Simbolo* func_simbolo = buscar_simbolo_em_todos_escopos(pilha, id_no->data.string_value);
-            if (func_simbolo == NULL) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Funcao '%s' nao foi declarada.", id_no->data.string_value);
-                erro_semantico(msg, id_no->linha);
-            }
-            
-            // --- LINKAGEM: SALVA O SIMBOLO DA FUNCAO ---
-            id_no->symbol = func_simbolo;
-            // -------------------------------------------
-
-            if (!func_simbolo->is_function) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "'%s' nao e uma funcao e nao pode ser chamada.", func_simbolo->nome);
-                erro_semantico(msg, id_no->linha);
-            }
-            ASTNode* arg_list_no = id_no->proximo_irmao;
-            int arg_count = 0;
-            if (arg_list_no && arg_list_no->node_type == NODE_ARG_LIST) {
-                ASTNode* expr_arg = arg_list_no->filho;
-                while (expr_arg) {
-                    if (arg_count >= func_simbolo->num_parametros) {
-                        erro_semantico("Numero excessivo de argumentos na chamada da funcao.", expr_arg->linha);
-                    }
-                    TokenType tipo_arg = get_expression_type(expr_arg, pilha, NULL);
-                    if (tipo_arg != func_simbolo->param_tipos[arg_count]) {
-                        erro_semantico("Tipo de argumento incompativel na chamada da funcao.", expr_arg->linha);
-                    }
-                    arg_count++;
-                    expr_arg = expr_arg->proximo_irmao;
+            if (simbolo->is_array) {
+                if (simbolo->tipo != CHAR) {
+                    erro_semantico("Array int deve ser usado com um indice.", expressao->linha);
                 }
+                expressao->inferred_type = STRINGCONST;
+                return STRINGCONST;
             }
-            if (arg_count < func_simbolo->num_parametros) {
-                erro_semantico("Numero insuficiente de argumentos na chamada da funcao.", expr_node->linha);
-            }
-            return func_simbolo->tipo;
+            expressao->inferred_type = simbolo->tipo;
+            return simbolo->tipo;
         }
+
+        case NODE_ARRAY_ACCESS: {
+            ASTNode* id = expressao->filho;
+            Simbolo* simbolo = resolver_simbolo(id, contexto);
+            if (!simbolo->is_array) {
+                erro_semantico("Somente arrays podem ser indexados.", id->linha);
+            }
+            if (obter_tipo_expressao(id->proximo_irmao, contexto, NULL) != INT) {
+                erro_semantico("Indice de array deve ser do tipo inteiro.", expressao->linha);
+            }
+            expressao->inferred_type = simbolo->tipo;
+            return simbolo->tipo;
+        }
+
+        case NODE_UNARY_OP:
+            if (obter_tipo_expressao(expressao->filho, contexto, NULL) != INT) {
+                erro_semantico("Operador unario espera uma expressao inteira.", expressao->linha);
+            }
+            expressao->inferred_type = INT;
+            return INT;
+
+        case NODE_BINARY_OP: {
+            TokenType esquerdo = obter_tipo_expressao(expressao->filho, contexto, NULL);
+            TokenType direito = obter_tipo_expressao(expressao->filho->proximo_irmao, contexto, NULL);
+            if (esquerdo != INT || direito != INT) {
+                erro_semantico("Tipos incompativeis em operacao binaria (esperado INT).", expressao->linha);
+            }
+            expressao->inferred_type = INT;
+            return INT;
+        }
+
+        case NODE_CALL:
+            return obter_tipo_chamada(expressao, contexto);
+
         default:
-            erro_semantico("Tipo de no inesperado dentro de uma expressao.", expr_node->linha);
+            erro_semantico("No inesperado dentro de uma expressao.", expressao->linha);
             return UNDEF;
     }
 }
 
-/** @brief função recursiva que percorre a árvore para análise semântica. */
-static void analisar_no(ASTNode* no, PilhaTabelasSimbolos* pilha, Simbolo* escopo_funcao_atual, bool is_param_decl) {
-    if (no == NULL) return;
+/** @brief reserva um offset único no frame da função atual. */
+static void atribuir_offset_local(Simbolo* simbolo, ContextoSemantico* contexto) {
+    int tamanho = tamanho_simbolo(simbolo);
+    int alinhamento = (!simbolo->is_array || simbolo->tipo == INT) ? 4 : 1;
+    if (alinhamento == 4) contexto->bytes_locais = alinhar_4(contexto->bytes_locais);
+    contexto->bytes_locais += tamanho;
+    simbolo->memory_offset = -contexto->bytes_locais;
+}
 
-    bool novo_escopo = false;
-    Simbolo* proxima_funcao_escopo = escopo_funcao_atual;
+/** @brief valida uma atribuição já representada na ast. */
+static void analisar_atribuicao(ASTNode* atribuicao, ContextoSemantico* contexto) {
+    ASTNode* esquerdo = atribuicao->filho;
+    ASTNode* direito = esquerdo->proximo_irmao;
+    TokenType tipo_esquerdo = obter_tipo_expressao(esquerdo, contexto, NULL);
+    int tamanho_string = 0;
+    TokenType tipo_direito = obter_tipo_expressao(direito, contexto, &tamanho_string);
 
-    //ações de pré-ordem
+    if (tipo_esquerdo != tipo_direito) {
+        erro_semantico("Atribuicao de tipos incompativeis.", atribuicao->linha);
+    }
+
+    if (tipo_esquerdo == STRINGCONST) {
+        if (esquerdo->node_type != NODE_ID || direito->node_type != NODE_STRING_CONST) {
+            erro_semantico("Arrays char so podem receber uma string literal.", atribuicao->linha);
+        }
+        Simbolo* destino = (Simbolo*)esquerdo->symbol;
+        if (tamanho_string > destino->array_size) {
+            char mensagem[256];
+            snprintf(mensagem, sizeof(mensagem),
+                     "String e muito grande para o array '%s' (capacidade %d, necessario %d).",
+                     destino->nome, destino->array_size, tamanho_string);
+            erro_semantico(mensagem, atribuicao->linha);
+        }
+    }
+}
+
+/** @brief declara um parâmetro ou variável e atribui seu endereço no frame. */
+static void analisar_declaracao(ASTNode* declaracao, ContextoSemantico* contexto, bool parametro) {
+    ASTNode* tipo = declaracao->filho;
+    ASTNode* id = tipo->proximo_irmao;
+    ASTNode* seguinte = id->proximo_irmao;
+    int is_array = 0;
+    int array_size = 0;
+
+    if (seguinte != NULL && seguinte->node_type == NODE_INTEGER_CONST) {
+        if (seguinte->data.int_value <= 0 || seguinte->data.int_value > INT_MAX) {
+            erro_semantico("Tamanho de array deve ser um inteiro positivo.", seguinte->linha);
+        }
+        is_array = 1;
+        array_size = (int)seguinte->data.int_value;
+        seguinte = seguinte->proximo_irmao;
+    }
+
+    if (parametro && is_array) {
+        erro_semantico("Arrays nao podem ser usados como parametros nesta versao.", id->linha);
+    }
+    if (parametro && seguinte != NULL && seguinte->node_type == NODE_ASSIGN) {
+        erro_semantico("Parametros nao podem possuir inicializador.", id->linha);
+    }
+    if (buscar_simbolo_no_escopo_atual(contexto->pilha, id->data.string_value) != NULL) {
+        char mensagem[256];
+        snprintf(mensagem, sizeof(mensagem), "'%s' ja foi declarado neste escopo.", id->data.string_value);
+        erro_semantico(mensagem, id->linha);
+    }
+
+    Simbolo* simbolo = adicionar_simbolo(contexto->pilha, id->data.string_value,
+                                          tipo->data.op_type, 0, is_array,
+                                          array_size, parametro);
+    if (simbolo == NULL) {
+        erro_semantico("Nao foi possivel adicionar o simbolo a tabela.", id->linha);
+    }
+    id->symbol = simbolo;
+
+    if (parametro) {
+        simbolo->memory_offset = 16 + contexto->proximo_parametro * 8;
+        contexto->proximo_parametro++;
+    } else {
+        atribuir_offset_local(simbolo, contexto);
+    }
+
+    if (seguinte != NULL && seguinte->node_type == NODE_ASSIGN) {
+        seguinte->filho->symbol = simbolo;
+        seguinte->filho->inferred_type = is_array && simbolo->tipo == CHAR ? STRINGCONST : simbolo->tipo;
+        analisar_atribuicao(seguinte, contexto);
+    }
+}
+
+/** @brief analisa um bloco, criando escopo quando necessário. */
+static void analisar_bloco(ASTNode* bloco, ContextoSemantico* contexto, bool criar_escopo) {
+    if (criar_escopo) empilhar_tabela(contexto->pilha);
+
+    for (ASTNode* instrucao = bloco->filho;
+         instrucao != NULL;
+         instrucao = instrucao->proximo_irmao) {
+        analisar_instrucao(instrucao, contexto);
+    }
+
+    if (criar_escopo) {
+        char titulo[80];
+        snprintf(titulo, sizeof(titulo), "Bloco Interno (Linha %d)", bloco->linha);
+        registrar_tabela(contexto->pilha->tabelas[contexto->pilha->topo], titulo);
+        desempilhar_tabela(contexto->pilha);
+    }
+}
+
+/** @brief analisa uma instrução e liga todos os símbolos utilizados. */
+static void analisar_instrucao(ASTNode* no, ContextoSemantico* contexto) {
+    if (no == NULL || no->node_type == NODE_UNDEFINED) return;
+
     switch (no->node_type) {
         case NODE_BLOCK:
-            empilhar_tabela(pilha);
-            novo_escopo = true;
+            analisar_bloco(no, contexto, true);
             break;
-            
-        case NODE_FUNCTION_DEF: {
-            ASTNode* tipo_retorno_no = no->filho;
-            ASTNode* id_no = tipo_retorno_no->proximo_irmao;
-            char* nome_func = id_no->data.string_value;
-            TokenType tipo_retorno = tipo_retorno_no->data.op_type;
 
-            if (buscar_simbolo_no_escopo_atual(pilha, nome_func)) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Funcao '%s' ja foi declarada.", nome_func);
-                erro_semantico(msg, id_no->linha);
-            }
-            
-            // --- LINKAGEM: Captura o símbolo e salva no nó ---
-            Simbolo* s = adicionar_simbolo(pilha, nome_func, tipo_retorno, 1, 0, 0, 0); //0 = não é parâmetro
-            id_no->symbol = s;
-            // -------------------------------------------------
-            
-            //define o escopo da função atual para os nós filhos
-            proxima_funcao_escopo = s;
-            
-            //1. cria o escopo da função (para params e locais)
-            empilhar_tabela(pilha);
-            novo_escopo = true; 
+        case NODE_VAR_DECL:
+            analisar_declaracao(no, contexto, false);
+            break;
 
-            //2. itera manualmente nos filhos
-            ASTNode* child = no->filho;
-            ASTNode* block_node = NULL;
-            
-            while(child) {
-                if (child->node_type == NODE_BLOCK) {
-                    //3. encontra o bloco, mas não o analisa ainda.
-                    block_node = child;
-                } else {
-                    //4. analisa os nós que vêm antes do bloco (type, id, param_list)
-                    bool proximo_e_param = (child->node_type == NODE_PARAM_LIST);
-                    analisar_no(child, pilha, proxima_funcao_escopo, proximo_e_param);
-                }
-                child = child->proximo_irmao;
-            }
-            
-            //5. agora, analisa os *filhos* do bloco, mas não o bloco em si.
-            //isso força as 'var_decl' a caírem no escopo atual (o da função)
-            if (block_node) {
-                ASTNode* block_child = block_node->filho;
-                while (block_child) {
-                    //'false' porque não são mais declarações de parâmetros
-                    analisar_no(block_child, pilha, proxima_funcao_escopo, false); 
-                    block_child = block_child->proximo_irmao;
-                }
-            }
+        case NODE_ASSIGN:
+            analisar_atribuicao(no, contexto);
+            break;
 
-            //6. ações de pós-ordem (só para este nó)
-            if (novo_escopo) {
-                calcular_offsets(pilha->tabelas[pilha->topo]);
-                
-                // --- IMPRESSÃO DA TABELA DE SÍMBOLOS (FUNÇÃO) ---
-                if (arquivo_simbolos) {
-                    char titulo[100];
-                    sprintf(titulo, "Funcao: %s", nome_func);
-                    imprimir_tabela(pilha->tabelas[pilha->topo], titulo, arquivo_simbolos);
-                    if (modo_verbose) {
-                        imprimir_tabela(pilha->tabelas[pilha->topo], titulo, stdout);
-                    }
-                }
-                // -----------------------------------------------
-
-                //nota: não desempilhamos aqui para manter a memória viva para o backend.
-                //a limpeza real ocorre no final do programa.
-                desempilhar_tabela(pilha);
-            }
-            
-            //7. retorna para impedir o loop recursivo padrão no final de analisar_no
-            return; 
-        }
-
-        case NODE_VAR_DECL: {
-            ASTNode* tipo_no = no->filho;
-            ASTNode* id_no = tipo_no->proximo_irmao;
-            char* nome_var = id_no->data.string_value;
-            TokenType tipo_var = tipo_no->data.op_type;
-            
-            int is_array = 0;
-            int array_size = 0;
-            ASTNode* proximo_no = id_no->proximo_irmao;
-            
-            if (proximo_no && proximo_no->node_type == NODE_INTEGER_CONST) {
-                is_array = 1;
-                array_size = proximo_no->data.int_value;
-                proximo_no = proximo_no->proximo_irmao;
-            }
-
-            if (buscar_simbolo_no_escopo_atual(pilha, nome_var)) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Variavel ou parametro '%s' ja foi declarado neste escopo.", nome_var);
-                erro_semantico(msg, id_no->linha);
-            }
-            
-            // --- LINKAGEM: Captura o símbolo e salva no nó ---
-            Simbolo* s = adicionar_simbolo(pilha, nome_var, tipo_var, 0, is_array, array_size, is_param_decl);
-            id_no->symbol = s;
-            // -------------------------------------------------
-
-            if (is_param_decl) { 
-                 if (escopo_funcao_atual->num_parametros < MAX_PARAMETROS) {
-                     escopo_funcao_atual->param_tipos[escopo_funcao_atual->num_parametros] = tipo_var;
-                     escopo_funcao_atual->num_parametros++;
-                 }
-            }
-
-            if (proximo_no && proximo_no->node_type == NODE_ASSIGN) {
-                int string_len = 0;
-                // Importante: Chama get_expression_type para o lado direito para garantir a linkagem dos símbolos lá!
-                TokenType tipo_expr = get_expression_type(proximo_no->filho->proximo_irmao, pilha, &string_len);
-                
-                if (is_array) {
-                    if (tipo_var == CHAR && tipo_expr == STRINGCONST) {
-                        if (string_len > array_size) {
-                            char msg[200];
-                            snprintf(msg, sizeof(msg), "String e muito grande para o array '%s' (tamanho %d, necessario %d).", nome_var, array_size, string_len);
-                            erro_semantico(msg, proximo_no->linha);
-                        }
-                    } else {
-                        erro_semantico("Arrays do tipo 'int' nao podem ser inicializados com string, e arrays 'char' so com string literal.", proximo_no->linha);
-                    }
-                } else {
-                    if (tipo_var != tipo_expr) {
-                        erro_semantico("Tipos incompativeis na inicializacao da variavel.", proximo_no->linha);
-                    }
-                }
-            }
-            return; //retorna para não visitar os filhos de var_decl
-        }
-        
-        // --- CORREÇÃO: Forçar linkagem em estruturas de controle ---
         case NODE_IF: {
-            ASTNode* cond = no->filho;
-            get_expression_type(cond, pilha, NULL); // Linka símbolos na condição
-            break; 
-        }
-        case NODE_FOR: {
-            ASTNode* init = no->filho;
-            ASTNode* cond = init->proximo_irmao;
-            ASTNode* inc = cond->proximo_irmao;
-            
-            // Linka símbolos na condição e incremento
-            if (cond && cond->node_type != NODE_UNDEFINED) get_expression_type(cond, pilha, NULL);
-            if (inc) {
-                 if (inc->node_type == NODE_ASSIGN) {
-                     get_expression_type(inc->filho, pilha, NULL);
-                     get_expression_type(inc->filho->proximo_irmao, pilha, NULL);
-                 } else {
-                     get_expression_type(inc, pilha, NULL);
-                 }
+            ASTNode* condicao = no->filho;
+            if (obter_tipo_expressao(condicao, contexto, NULL) != INT) {
+                erro_semantico("Condicao do if deve ser inteira.", condicao->linha);
+            }
+            analisar_instrucao(condicao->proximo_irmao, contexto);
+            if (condicao->proximo_irmao != NULL) {
+                analisar_instrucao(condicao->proximo_irmao->proximo_irmao, contexto);
             }
             break;
         }
+
+        case NODE_FOR: {
+            empilhar_tabela(contexto->pilha);
+            ASTNode* inicializacao = no->filho;
+            ASTNode* condicao = inicializacao->proximo_irmao;
+            ASTNode* incremento = condicao->proximo_irmao;
+            ASTNode* corpo = incremento->proximo_irmao;
+            analisar_instrucao(inicializacao, contexto);
+            if (condicao->node_type != NODE_UNDEFINED &&
+                obter_tipo_expressao(condicao, contexto, NULL) != INT) {
+                erro_semantico("Condicao do for deve ser inteira.", condicao->linha);
+            }
+            analisar_instrucao(incremento, contexto);
+            analisar_instrucao(corpo, contexto);
+            char titulo[80];
+            snprintf(titulo, sizeof(titulo), "Escopo do For (Linha %d)", no->linha);
+            registrar_tabela(contexto->pilha->tabelas[contexto->pilha->topo], titulo);
+            desempilhar_tabela(contexto->pilha);
+            break;
+        }
+
         case NODE_RETURN: {
-            if (no->filho) get_expression_type(no->filho, pilha, NULL);
-            // Continua a verificação semântica padrão abaixo
-            if (escopo_funcao_atual == NULL) {
-                erro_semantico("Comando 'return' encontrado fora de uma funcao.", no->linha);
+            if (no->filho == NULL) {
+                erro_semantico("Funcao int ou char deve retornar um valor.", no->linha);
             }
-            TokenType tipo_retornado = (no->filho) ? get_expression_type(no->filho, pilha, NULL) : UNDEF;
-            if (escopo_funcao_atual->tipo != tipo_retornado) {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "Tipo de retorno incompativel para a funcao '%s'.", escopo_funcao_atual->nome);
-                erro_semantico(msg, no->linha);
+            TokenType tipo = obter_tipo_expressao(no->filho, contexto, NULL);
+            if (tipo != contexto->funcao->tipo) {
+                erro_semantico("Tipo de retorno incompativel com a funcao.", no->linha);
             }
-            return; // Já analisado
+            break;
         }
+
         case NODE_PRINT: {
-            if (no->filho) get_expression_type(no->filho, pilha, NULL);
-            // Continua verificação abaixo
-            ASTNode* expr_no = no->filho;
-            if (expr_no == NULL) {
-                erro_semantico("Comando 'print' espera um argumento para imprimir.", no->linha);
+            TokenType tipo = obter_tipo_expressao(no->filho, contexto, NULL);
+            if (tipo != INT && tipo != CHAR && tipo != STRINGCONST) {
+                erro_semantico("Argumento invalido para print.", no->linha);
             }
-            TokenType tipo_expr = get_expression_type(expr_no, pilha, NULL);
-            if (tipo_expr != INT && tipo_expr != CHAR && tipo_expr != STRINGCONST) {
-                erro_semantico("Argumento invalido para 'print'. So e possivel imprimir int, char ou uma string literal.", expr_no->linha);
-            }
-            return;
+            break;
         }
-        case NODE_ASSIGN: {
-            // Garante linkagem em ambos os lados
-            get_expression_type(no->filho, pilha, NULL);
-            get_expression_type(no->filho->proximo_irmao, pilha, NULL);
-            
-            TokenType tipo_esq = get_expression_type(no->filho, pilha, NULL);
-            TokenType tipo_dir = get_expression_type(no->filho->proximo_irmao, pilha, NULL);
-            if (tipo_esq != tipo_dir) {
-                erro_semantico("Atribuicao de tipos incompativeis.", no->linha);
-            }
-            return;
-        }
-        case NODE_CALL: {
-            get_expression_type(no, pilha, NULL);
-            return;
-        }
-        case NODE_ARRAY_ACCESS: {
-            get_expression_type(no, pilha, NULL);
-            return;
-        }
-        // -----------------------------------------------------------
 
-        default: break;
-    }
+        case NODE_CALL:
+            obter_tipo_chamada(no, contexto);
+            break;
 
-    //lógica de descida na árvore (unificada)
-    ASTNode* filho = no->filho;
-    while (filho != NULL) {
-        //define a flag 'is_param_decl' corretamente ANTES de visitar o filho
-        bool proximo_e_param = (no->node_type == NODE_FUNCTION_DEF && filho->node_type == NODE_PARAM_LIST) ||
-                               (no->node_type == NODE_PARAM_LIST);
-                               
-        analisar_no(filho, pilha, proxima_funcao_escopo, proximo_e_param);
-        filho = filho->proximo_irmao;
-    }
+        case NODE_ARRAY_ACCESS:
+        case NODE_BINARY_OP:
+        case NODE_UNARY_OP:
+        case NODE_ID:
+            obter_tipo_expressao(no, contexto, NULL);
+            break;
 
-    //ações de pós-ordem (unificada)
-    if (novo_escopo) {
-        //calcula os offsets para as variáveis deste escopo
-        calcular_offsets(pilha->tabelas[pilha->topo]);
-        
-        // --- IMPRESSÃO DE BLOCOS ANÔNIMOS (IF/FOR/WHILE) ---
-        // Apenas se for um bloco puro (não função) e tivermos arquivo aberto
-        if (no->node_type == NODE_BLOCK && arquivo_simbolos) {
-            char titulo[50];
-            sprintf(titulo, "Bloco Interno (Linha %d)", no->linha);
-            imprimir_tabela(pilha->tabelas[pilha->topo], titulo, arquivo_simbolos);
-            if (modo_verbose) {
-                imprimir_tabela(pilha->tabelas[pilha->topo], titulo, stdout);
-            }
-        }
-        // ---------------------------------------------------
-        
-        desempilhar_tabela(pilha); 
-
+        default:
+            break;
     }
 }
 
+//================================================================================
+// ANÁLISE DE FLUXO DE RETORNO
+//================================================================================
 
-/** @brief função principal que dispara a análise semântica. */
-void analisar_semanticamente(ASTNode* raiz, PilhaTabelasSimbolos* pilha, bool verbose) {
-    if (raiz == NULL) {
-        printf("Aviso: Arvore sintatica vazia. Nada para analisar.\n");
-        return;
+/** @brief informa se uma instrução garante retorno em todos os seus caminhos. */
+static bool instrucao_retorna(const ASTNode* no) {
+    if (no == NULL) return false;
+    if (no->node_type == NODE_RETURN) return true;
+
+    if (no->node_type == NODE_IF) {
+        const ASTNode* bloco_then = no->filho != NULL ? no->filho->proximo_irmao : NULL;
+        const ASTNode* bloco_else = bloco_then != NULL ? bloco_then->proximo_irmao : NULL;
+        return bloco_else != NULL && instrucao_retorna(bloco_then) && instrucao_retorna(bloco_else);
     }
 
-    // Configura os arquivos e modo verbose
+    if (no->node_type == NODE_BLOCK) {
+        for (const ASTNode* filho = no->filho; filho != NULL; filho = filho->proximo_irmao) {
+            if (instrucao_retorna(filho)) return true;
+        }
+    }
+    return false;
+}
+
+/** @brief analisa parâmetros e corpo de uma função registrada. */
+static void analisar_funcao(ASTNode* no, PilhaTabelasSimbolos* pilha) {
+    ASTNode* id = no->filho->proximo_irmao;
+    ASTNode* seguinte = id->proximo_irmao;
+    ASTNode* parametros = NULL;
+    ASTNode* corpo = seguinte;
+    if (seguinte != NULL && seguinte->node_type == NODE_PARAM_LIST) {
+        parametros = seguinte;
+        corpo = seguinte->proximo_irmao;
+    }
+
+    ContextoSemantico contexto = {
+        .pilha = pilha,
+        .funcao = (Simbolo*)id->symbol,
+        .bytes_locais = 0,
+        .proximo_parametro = 0
+    };
+
+    empilhar_tabela(pilha);
+    if (parametros != NULL) {
+        for (ASTNode* parametro = parametros->filho;
+             parametro != NULL;
+             parametro = parametro->proximo_irmao) {
+            analisar_declaracao(parametro, &contexto, true);
+        }
+    }
+    analisar_bloco(corpo, &contexto, false);
+
+    if (!instrucao_retorna(corpo)) {
+        char mensagem[256];
+        snprintf(mensagem, sizeof(mensagem),
+                 "Funcao '%s' pode terminar sem retornar um valor.", contexto.funcao->nome);
+        erro_semantico(mensagem, id->linha);
+    }
+
+    contexto.funcao->local_size = alinhar_4(contexto.bytes_locais);
+    contexto.funcao->frame_size = alinhar_16(contexto.funcao->local_size);
+
+    char titulo[128];
+    snprintf(titulo, sizeof(titulo), "Funcao: %s", contexto.funcao->nome);
+    registrar_tabela(pilha->tabelas[pilha->topo], titulo);
+    desempilhar_tabela(pilha);
+}
+
+/** @brief executa as passagens da análise semântica. */
+void analisar_semanticamente(ASTNode* raiz, PilhaTabelasSimbolos* pilha, bool verbose) {
+    if (raiz == NULL || pilha == NULL) {
+        fprintf(stderr, "Erro: Arvore ou tabela de simbolos invalida.\n");
+        exit(EXIT_FAILURE);
+    }
+
     modo_verbose = verbose;
     arquivo_simbolos = fopen("symbols.txt", "w");
-    if (!arquivo_simbolos) {
+    if (arquivo_simbolos == NULL) {
         perror("Aviso: Nao foi possivel criar symbols.txt");
     }
 
-    analisar_no(raiz, pilha, NULL, false);
-    
-    // --- IMPRIME O ESCOPO GLOBAL (BASE DA PILHA) AO FINAL ---
-    if (arquivo_simbolos && pilha->topo >= 0) {
-        imprimir_tabela(pilha->tabelas[0], "GLOBAL", arquivo_simbolos);
-        if (modo_verbose) {
-            imprimir_tabela(pilha->tabelas[0], "GLOBAL", stdout);
-        }
+    registrar_funcoes(raiz, pilha);
+    for (ASTNode* funcao = raiz->filho; funcao != NULL; funcao = funcao->proximo_irmao) {
+        analisar_funcao(funcao, pilha);
     }
-    // --------------------------------------------------------
+    registrar_tabela(pilha->tabelas[0], "GLOBAL");
 
-    if (arquivo_simbolos) {
-        fclose(arquivo_simbolos);
-        arquivo_simbolos = NULL;
-    }
+    if (arquivo_simbolos != NULL) fclose(arquivo_simbolos);
+    arquivo_simbolos = NULL;
 }

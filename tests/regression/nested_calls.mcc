@@ -1,0 +1,18 @@
+int somar(int a, int b) {
+    return a + b;
+}
+
+int dobro(int valor) {
+    return valor * 2;
+}
+
+int somar_tres(int a, int b, int c) {
+    return a + b + c;
+}
+
+int main() {
+    print(somar(1, dobro(2)));
+    print(somar(dobro(3), 4));
+    print(somar_tres(1, 2, 3));
+    return 0;
+}

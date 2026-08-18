@@ -1,0 +1,9 @@
+int valor(int condicao) {
+    if (condicao) {
+        return 1;
+    }
+}
+
+int main() {
+    return 0;
+}

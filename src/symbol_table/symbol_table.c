@@ -25,6 +25,7 @@ PilhaTabelasSimbolos* criar_pilha_tabelas() {
         exit(EXIT_FAILURE);
     }
     pilha->topo = -1;
+    pilha->quantidade_tabelas = 0;
     empilhar_tabela(pilha); //empilha a tabela de escopo global
     return pilha;
 }
@@ -34,8 +35,10 @@ PilhaTabelasSimbolos* criar_pilha_tabelas() {
  * @param pilha ponteiro para a pilha a ser destruída.
  */
 void destruir_pilha_tabelas(PilhaTabelasSimbolos *pilha) {
-    while (pilha->topo >= 0) {
-        desempilhar_tabela(pilha);
+    if (pilha == NULL) return;
+
+    for (int i = 0; i < pilha->quantidade_tabelas; i++) {
+        free(pilha->tabelas_alocadas[i]);
     }
     free(pilha);
 }
@@ -45,7 +48,7 @@ void destruir_pilha_tabelas(PilhaTabelasSimbolos *pilha) {
  * @param pilha ponteiro para a pilha onde a nova tabela será adicionada.
  */
 void empilhar_tabela(PilhaTabelasSimbolos *pilha) {
-    if (pilha->topo + 1 >= MAX_SIMBOLOS) {
+    if (pilha->topo + 1 >= MAX_SIMBOLOS || pilha->quantidade_tabelas >= MAX_SIMBOLOS) {
         printf("Erro: Pilha de tabelas cheia\n");
         exit(EXIT_FAILURE);
     }
@@ -55,6 +58,7 @@ void empilhar_tabela(PilhaTabelasSimbolos *pilha) {
         exit(EXIT_FAILURE);
     }
     nova_tabela->tamanho = 0;
+    pilha->tabelas_alocadas[pilha->quantidade_tabelas++] = nova_tabela;
     pilha->tabelas[++pilha->topo] = nova_tabela;
 }
 
@@ -65,8 +69,7 @@ void desempilhar_tabela(PilhaTabelasSimbolos *pilha) {
         exit(EXIT_FAILURE);
     }
     
-    //NÃO libera a memória aqui. Apenas decrementa o ponteiro do topo.
-    //a limpeza de memória será feita por destruir_pilha_tabelas() no main.c
+    //mantém a tabela alocada porque a ast e a ir ainda referenciam seus símbolos
     pilha->topo--;
 }
 
@@ -91,7 +94,7 @@ Simbolo* adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenT
         return NULL; 
     }
     Simbolo *s = &tabela->simbolos[tabela->tamanho];
-    strncpy(s->nome, nome, 100);
+    snprintf(s->nome, sizeof(s->nome), "%s", nome);
     s->tipo = tipo;
     s->is_function = is_function;
     s->num_parametros = 0;
@@ -101,6 +104,8 @@ Simbolo* adicionar_simbolo(PilhaTabelasSimbolos *pilha, const char *nome, TokenT
 
     s->is_parameter = is_parameter;
     s->memory_offset = 0; //será calculado pelo semantic.c
+    s->local_size = 0;
+    s->frame_size = 0;
     
     tabela->tamanho++;
     

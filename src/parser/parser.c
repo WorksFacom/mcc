@@ -1,7 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <limits.h>
 #include "parser.h"
+
+/** @brief cria uma cópia portável de uma string. */
+static char* duplicar_string(const char* texto) {
+    size_t tamanho = strlen(texto) + 1;
+    char* copia = malloc(tamanho);
+    if (copia == NULL) {
+        fprintf(stderr, "Erro fatal: Falha ao copiar string da AST.\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(copia, texto, tamanho);
+    return copia;
+}
 
 /**
  * @file parser.c
@@ -30,14 +44,16 @@ const char* token_name(TokenType tipo) {
         case LBRACE: return "LBRACE"; case RBRACE: return "RBRACE"; case LBRACKET: return "LBRACKET";
         case RBRACKET: return "RBRACKET"; case MAIN: return "MAIN"; case IF: return "IF";
         case ELSE: return "ELSE"; case FOR: return "FOR"; case RETURN: return "RETURN";
-        case INT: return "INT"; case CHAR: return "CHAR"; case END_OF_FILE: return "END_OF_FILE";
+        case INT: return "INT"; case CHAR: return "CHAR"; case PRINT: return "PRINT";
+        case END_OF_FILE: return "END_OF_FILE";
         default: return "TOKEN_DESCONHECIDO";
     }
 }
 
 /** @brief inicializa uma lista de tokens. */
 int inicializar_token_list(TokenList *lista, int capacidade_inicial) {
-    lista->tokens = malloc(capacidade_inicial * sizeof(Token));
+    if (lista == NULL || capacidade_inicial <= 0) return -1;
+    lista->tokens = malloc((size_t)capacidade_inicial * sizeof(Token));
     if (lista->tokens == NULL) {
         printf("Erro: Falha ao alocar memoria para lista de tokens\n");
         return -1;
@@ -63,15 +79,16 @@ int carregar_tokens(const char *nome_arquivo, TokenList *lista) {
     while (fgets(linha_str, sizeof(linha_str), arquivo)) {
         int tipo, linha_num;
         char lexema[100];
-        if (sscanf(linha_str, "Token: tipo = %d, lexema = '%[^']', linha = %d", &tipo, lexema, &linha_num) != 3) { continue; }
+        if (sscanf(linha_str, "Token: tipo = %d, lexema = '%99[^']', linha = %d", &tipo, lexema, &linha_num) != 3) { continue; }
         if (lista->tamanho >= lista->capacidade) {
             lista->capacidade *= 2;
-            Token *nova_lista = realloc(lista->tokens, lista->capacidade * sizeof(Token));
+            Token *nova_lista = realloc(lista->tokens, (size_t)lista->capacidade * sizeof(Token));
             if (nova_lista == NULL) { fclose(arquivo); return -1; }
             lista->tokens = nova_lista;
         }
         lista->tokens[lista->tamanho].tipo = (TokenType)tipo;
-        strncpy(lista->tokens[lista->tamanho].lexema, lexema, 100);
+        snprintf(lista->tokens[lista->tamanho].lexema,
+                 sizeof(lista->tokens[lista->tamanho].lexema), "%s", lexema);
         lista->tokens[lista->tamanho].linha = linha_num;
         lista->tamanho++;
     }
@@ -83,7 +100,7 @@ int carregar_tokens(const char *nome_arquivo, TokenList *lista) {
 void adicionar_token(TokenList* lista, Token token) {
     if (lista->tamanho >= lista->capacidade) {
         lista->capacidade *= 2;
-        Token* nova_lista = realloc(lista->tokens, lista->capacidade * sizeof(Token));
+        Token* nova_lista = realloc(lista->tokens, (size_t)lista->capacidade * sizeof(Token));
         if (nova_lista == NULL) {
             fprintf(stderr, "Erro fatal: Falha ao redimensionar a lista de tokens.\n");
             exit(EXIT_FAILURE);
@@ -166,10 +183,20 @@ ASTNode* arg_list(Parser *parser);
 
 /** @brief processa a regra 'factor' (números, IDs, parênteses, chamadas de função e acesso a array). */
 ASTNode* factor(Parser *parser) {
+    if (parser->current_token == NULL) {
+        error(parser, "Fim de arquivo inesperado dentro de uma expressao.");
+    }
     int line = parser->current_token->linha;
     if (parser->current_token->tipo == INTEGERCONST) {
         ASTNode* node = criar_no(NODE_INTEGER_CONST, line);
-        node->data.int_value = atol(parser->current_token->lexema);
+        errno = 0;
+        char* fim = NULL;
+        long valor = strtol(parser->current_token->lexema, &fim, 10);
+        if (errno == ERANGE || fim == parser->current_token->lexema || *fim != '\0' ||
+            valor < INT_MIN || valor > INT_MAX) {
+            error(parser, "Constante inteira fora do intervalo suportado.");
+        }
+        node->data.int_value = valor;
         match(parser, INTEGERCONST);
         return node;
     }
@@ -181,13 +208,13 @@ ASTNode* factor(Parser *parser) {
     }
     if (parser->current_token->tipo == STRINGCONST) {
         ASTNode* node = criar_no(NODE_STRING_CONST, line);
-        node->data.string_value = strdup(parser->current_token->lexema);
+        node->data.string_value = duplicar_string(parser->current_token->lexema);
         match(parser, STRINGCONST);
         return node;
     }
     if (parser->current_token->tipo == ID) {
         ASTNode* id_node = criar_no(NODE_ID, line);
-        id_node->data.string_value = strdup(parser->current_token->lexema);
+        id_node->data.string_value = duplicar_string(parser->current_token->lexema);
         match(parser, ID);
 
         //verifica se é uma chamada de função
@@ -222,9 +249,24 @@ ASTNode* factor(Parser *parser) {
     return NULL;
 }
 
+/** @brief processa negação aritmética e lógica com associação à direita. */
+ASTNode* unary_expression(Parser* parser) {
+    if (parser->current_token != NULL &&
+        (parser->current_token->tipo == MINUS || parser->current_token->tipo == NOT)) {
+        TokenType operador = parser->current_token->tipo;
+        int linha = parser->current_token->linha;
+        match(parser, operador);
+        ASTNode* no = criar_no(NODE_UNARY_OP, linha);
+        no->data.op_type = operador;
+        adicionar_filho(no, unary_expression(parser));
+        return no;
+    }
+    return factor(parser);
+}
+
 /** @brief processa um termo (multiplicação/divisão). */
 ASTNode* term(Parser *parser) {
-    ASTNode* node = factor(parser);
+    ASTNode* node = unary_expression(parser);
     while (parser->current_token && (parser->current_token->tipo == MUL || parser->current_token->tipo == DIV || parser->current_token->tipo == MOD)) {
         TokenType op = parser->current_token->tipo;
         int line = parser->current_token->linha;
@@ -232,7 +274,7 @@ ASTNode* term(Parser *parser) {
         ASTNode* op_node = criar_no(NODE_BINARY_OP, line);
         op_node->data.op_type = op;
         adicionar_filho(op_node, node);
-        adicionar_filho(op_node, factor(parser));
+        adicionar_filho(op_node, unary_expression(parser));
         node = op_node;
     }
     return node;
@@ -305,8 +347,8 @@ ASTNode* expression(Parser *parser) {
 /** @brief processa uma lista de argumentos em uma chamada de função. */
 ASTNode* arg_list(Parser *parser) {
     ASTNode* args_node = criar_no(NODE_ARG_LIST, parser->current_token ? parser->current_token->linha : 0);
-    
-    if (parser->current_token->tipo != RPAREN) {
+
+    if (parser->current_token != NULL && parser->current_token->tipo != RPAREN) {
         while (1) {
             adicionar_filho(args_node, expression(parser));
             if (parser->current_token->tipo == COMMA) {
@@ -339,7 +381,7 @@ ASTNode* function(Parser *parser) {
     ASTNode* func_node = criar_no(NODE_FUNCTION_DEF, func_line);
     adicionar_filho(func_node, type(parser));
     ASTNode* id_node = criar_no(NODE_ID, func_line);
-    id_node->data.string_value = strdup(parser->current_token->lexema);
+    id_node->data.string_value = duplicar_string(parser->current_token->lexema);
     adicionar_filho(func_node, id_node);
     if (parser->current_token->tipo == ID) match(parser, ID); else match(parser, MAIN);
     match(parser, LPAREN);
@@ -347,6 +389,9 @@ ASTNode* function(Parser *parser) {
         adicionar_filho(func_node, param_list(parser));
     }
     match(parser, RPAREN);
+    if (parser->current_token == NULL || parser->current_token->tipo != LBRACE) {
+        error(parser, "Corpo de funcao deve ser delimitado por chaves.");
+    }
     adicionar_filho(func_node, statement(parser));
     return func_node;
 }
@@ -382,24 +427,25 @@ ASTNode* var_declaration(Parser *parser) {
     ASTNode* decl_node = criar_no(NODE_VAR_DECL, line);
     adicionar_filho(decl_node, type(parser));
     ASTNode* id_node = criar_no(NODE_ID, line);
-    id_node->data.string_value = strdup(parser->current_token->lexema);
+    id_node->data.string_value = duplicar_string(parser->current_token->lexema);
     adicionar_filho(decl_node, id_node);
     match(parser, ID);
     if (parser->current_token->tipo == LBRACKET) {
         match(parser, LBRACKET);
-        if (parser->current_token->tipo == INTEGERCONST) {
-            ASTNode* size_node = criar_no(NODE_INTEGER_CONST, line);
-            size_node->data.int_value = atol(parser->current_token->lexema);
-            adicionar_filho(decl_node, size_node);
-            match(parser, INTEGERCONST);
+        if (parser->current_token->tipo != INTEGERCONST) {
+            error(parser, "Declaracao de array exige um tamanho inteiro.");
         }
+        ASTNode* size_node = criar_no(NODE_INTEGER_CONST, line);
+        size_node->data.int_value = strtol(parser->current_token->lexema, NULL, 10);
+        adicionar_filho(decl_node, size_node);
+        match(parser, INTEGERCONST);
         match(parser, RBRACKET);
     }
     if (parser->current_token->tipo == ASSIGN) {
         match(parser, ASSIGN);
         ASTNode* assign_node = criar_no(NODE_ASSIGN, line);
         ASTNode* id_clone_node = criar_no(NODE_ID, id_node->linha);
-        id_clone_node->data.string_value = strdup(id_node->data.string_value);
+        id_clone_node->data.string_value = duplicar_string(id_node->data.string_value);
         adicionar_filho(assign_node, id_clone_node);
         adicionar_filho(assign_node, expression(parser));
         adicionar_filho(decl_node, assign_node);
@@ -480,7 +526,7 @@ ASTNode* statement(Parser *parser) {
 ASTNode* assign(Parser *parser) {
     int line = parser->current_token->linha;
     ASTNode* id_node = criar_no(NODE_ID, line);
-    id_node->data.string_value = strdup(parser->current_token->lexema);
+    id_node->data.string_value = duplicar_string(parser->current_token->lexema);
     match(parser, ID);
     ASTNode* left_node = id_node; 
     if(parser->current_token && parser->current_token->tipo == LBRACKET) {

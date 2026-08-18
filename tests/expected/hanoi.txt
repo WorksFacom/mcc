@@ -1,0 +1,22 @@
+--- Torre de Hanoi com 3 discos (A -> C) ---
+A
+C
+
+A
+B
+
+C
+B
+
+A
+C
+
+B
+A
+
+B
+C
+
+A
+C
+

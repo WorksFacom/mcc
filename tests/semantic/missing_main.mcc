@@ -1,0 +1,3 @@
+int auxiliar() {
+    return 0;
+}

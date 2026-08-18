@@ -2,7 +2,7 @@
 CC = gcc
 
 # Flags de compilação: -g para debug, -Wall para avisos, -I para diretórios de include
-CFLAGS = -g -Wall -Isrc/tokens -Isrc/scanner -Isrc/parser -Isrc/ast -Isrc/symbol_table -Isrc/semantic -Isrc/ir -Isrc/intercode -Isrc/assembly
+CFLAGS = -std=c17 -g -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=2 -Werror -Isrc/tokens -Isrc/scanner -Isrc/parser -Isrc/ast -Isrc/symbol_table -Isrc/semantic -Isrc/ir -Isrc/intercode -Isrc/assembly
 
 # Nome do executável final
 TARGET = mcc
@@ -110,6 +110,15 @@ run: $(TARGET)
 	@echo "Execução finalizada de: $(INPUT)"
 	@echo "=============================================="
 
+# Executa a suíte de regressão de ponta a ponta.
+test: $(TARGET)
+	@./tests/run-tests.sh
+
+# Recompila o projeto com verificações de memória e comportamento indefinido.
+sanitize: clean
+	$(MAKE) CFLAGS="$(CFLAGS) -O0 -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="-fsanitize=address,undefined"
+	@ASAN_OPTIONS=detect_leaks=0 ./tests/run-tests.sh --compiler-only
+
 
 # 'make gen-asm' roda o compilador até a geração de assembly
 gen-asm: $(ASM_OUTPUT)
@@ -159,7 +168,7 @@ gen-ir: $(TARGET)
 # --- REGRAS DE COMPILAÇÃO E LIMPEZA ---
 # Regra para linkar os arquivos objeto e criar o executável final
 $(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(TARGET)
+	$(CC) $(OBJECTS) $(LDFLAGS) -o $(TARGET)
 
 # Regra genérica para compilar um arquivo .c em um .o
 %.o: %.c $(DEPS)
@@ -190,4 +199,4 @@ endif
 
 
 # Declara alvos que não são arquivos
-.PHONY: all clean install uninstall run scan parse semantic gen-ir gen-asm
+.PHONY: all clean install uninstall run scan parse semantic gen-ir gen-asm test sanitize

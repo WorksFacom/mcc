@@ -2,103 +2,115 @@
  * @file intercode.c
  * @brief implementação do gerador de código intermediário.
  *
- * este módulo percorre a árvore sintática abstrata (ast) e a traduz
- * para uma representação intermediária linear (ir) em formato de
- * código de três endereços.
+ * este módulo percorre a ast validada e a traduz para uma representação
+ * intermediária linear em formato de código de três endereços.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "intercode.h"
 
-//variaveis globais estaticas para gerenciar o estado da geracao de codigo
+//================================================================================
+// ESTADO DA GERAÇÃO
+//================================================================================
+
 static int temp_counter = 0;
 static int label_counter = 0;
+static Simbolo* funcao_atual = NULL;
 static IR_Instruction* ir_list_head = NULL;
 static IR_Instruction* ir_list_tail = NULL;
 
-//prototipos de funcoes auxiliares internas
+//================================================================================
+// FUNÇÕES AUXILIARES
+//================================================================================
+
 static IROperand* criar_operando(OperandType type);
-static IROperand* criar_operando_temporario();
-static IROperand* criar_operando_label_novo();
+static IROperand* criar_operando_temporario(void);
+static IROperand* criar_operando_label_novo(void);
 static IROperand* criar_operando_label_nome(const char* nome);
-static void emitir(IROpcode op, IROperand* res, IROperand* arg1, IROperand* arg2);
+static void emitir(IROpcode op, const IROperand* res, const IROperand* arg1, const IROperand* arg2);
 static void gerar_ir_no(ASTNode* no);
 static IROperand* gerar_ir_expr(ASTNode* no);
 static IROperand* gerar_ir_call(ASTNode* no);
-static TokenType get_expr_static_type(ASTNode* expr_node);
-static IROperand* copiar_operando(IROperand* op);
 
-/** @brief aloca e cria um operando genérico. */
-static IROperand* criar_operando(OperandType type) {
-    IROperand* op = (IROperand*) malloc(sizeof(IROperand));
-    op->type = type;
-    op->owns_label = 0; //inicializa a flag
-    memset(&op->data, 0, sizeof(op->data)); //zera a uniao
-    return op;
+/** @brief encerra a compilação quando uma alocação da ir falha. */
+static void erro_fatal_ir(void) {
+    fprintf(stderr, "Erro fatal: Falha ao alocar memoria para a IR.\n");
+    exit(EXIT_FAILURE);
 }
 
-/** @brief cria um novo operando para uma variável temporária. */
-static IROperand* criar_operando_temporario() {
-    IROperand* op = criar_operando(OPERAND_TEMP);
-    op->data.temp_id = temp_counter++;
-    return op;
-}
-
-/** @brief cria um novo operando para um rótulo gerado automaticamente. */
-static IROperand* criar_operando_label_novo() {
-    IROperand* op = criar_operando(OPERAND_LABEL);
-    op->data.label_name = (char*) malloc(16);
-    sprintf(op->data.label_name, "L%d", label_counter++);
-    op->owns_label = 1; //este operando e o "dono" da string do label
-    return op;
-}
-
-/** @brief cria um novo operando para um rótulo com nome específico. */
-static IROperand* criar_operando_label_nome(const char* nome) {
-    IROperand* op = criar_operando(OPERAND_LABEL);
-    op->data.label_name = strdup(nome);
-    //esta copia e "dona" da sua propria string alocada
-    op->owns_label = 1; 
-    return op;
-}
-
-/** @brief cria uma cópia de um operando. */
-static IROperand* copiar_operando(IROperand* op) {
-    if (op == NULL) return NULL;
-
-    IROperand* copia = criar_operando(op->type);
-    //copia os dados
-    memcpy(&copia->data, &op->data, sizeof(op->data));
-    
-    //se o original era um label, criamos uma nova copia da string
-    if (op->type == OPERAND_LABEL || op->type == OPERAND_STRING_LBL) {
-        if (op->data.label_name) {
-            copia->data.label_name = strdup(op->data.label_name);
-            copia->owns_label = 1; //a copia e dona da sua propria string
-        }
-    }
-    
-    //se tiver conteúdo de string literal, duplicamos também
-    if (op->string_content) {
-        copia->string_content = strdup(op->string_content);
-    } else {
-        copia->string_content = NULL;
-    }
-    
+/** @brief cria uma cópia portável de uma string. */
+static char* duplicar_string(const char* texto) {
+    size_t tamanho = strlen(texto) + 1;
+    char* copia = malloc(tamanho);
+    if (copia == NULL) erro_fatal_ir();
+    memcpy(copia, texto, tamanho);
     return copia;
 }
 
+/** @brief alinha um tamanho para o próximo múltiplo de 16 bytes. */
+static int alinhar_16(int tamanho) {
+    return (tamanho + 15) & ~15;
+}
 
+/** @brief aloca e inicializa completamente um operando. */
+static IROperand* criar_operando(OperandType type) {
+    IROperand* op = calloc(1, sizeof(*op));
+    if (op == NULL) erro_fatal_ir();
+    op->type = type;
+    return op;
+}
 
-/** @brief cria e anexa uma nova instrução à lista de ir. */
-static void emitir(IROpcode op, IROperand* res, IROperand* arg1, IROperand* arg2) {
-    IR_Instruction* instr = (IR_Instruction*) malloc(sizeof(IR_Instruction));
+/** @brief cria um temporário na região exclusiva do frame atual. */
+static IROperand* criar_operando_temporario(void) {
+    IROperand* op = criar_operando(OPERAND_TEMP);
+    op->data.temp_id = temp_counter++;
+
+    if (funcao_atual != NULL) {
+        op->stack_offset = -(funcao_atual->local_size + (op->data.temp_id + 1) * 4);
+    }
+    return op;
+}
+
+/** @brief cria um rótulo interno único. */
+static IROperand* criar_operando_label_novo(void) {
+    char nome[32];
+    snprintf(nome, sizeof(nome), ".L%d", label_counter++);
+    return criar_operando_label_nome(nome);
+}
+
+/** @brief cria um operando de rótulo com nome próprio. */
+static IROperand* criar_operando_label_nome(const char* nome) {
+    IROperand* op = criar_operando(OPERAND_LABEL);
+    op->data.label_name = duplicar_string(nome);
+    op->owns_label = 1;
+    return op;
+}
+
+/**
+ * @brief adiciona uma instrução com cópias próprias de seus operandos.
+ *
+ * cada instrução é proprietária dos operandos armazenados nela. os operandos
+ * recebidos permanecem pertencendo ao chamador e podem ser reutilizados.
+ */
+static void emitir(IROpcode op, const IROperand* res, const IROperand* arg1, const IROperand* arg2) {
+    IR_Instruction* instr = calloc(1, sizeof(*instr));
+    if (instr == NULL) erro_fatal_ir();
+
     instr->opcode = op;
-    instr->result = res;
-    instr->arg1 = arg1;
-    instr->arg2 = arg2;
-    instr->next = NULL;
+    instr->result = copiar_operando(res);
+    instr->arg1 = copiar_operando(arg1);
+    instr->arg2 = copiar_operando(arg2);
+
+    if ((res != NULL && instr->result == NULL) ||
+        (arg1 != NULL && instr->arg1 == NULL) ||
+        (arg2 != NULL && instr->arg2 == NULL)) {
+        liberar_operando(instr->result);
+        liberar_operando(instr->arg1);
+        liberar_operando(instr->arg2);
+        free(instr);
+        erro_fatal_ir();
+    }
 
     if (ir_list_head == NULL) {
         ir_list_head = ir_list_tail = instr;
@@ -108,360 +120,337 @@ static void emitir(IROpcode op, IROperand* res, IROperand* arg1, IROperand* arg2
     }
 }
 
-/** @brief função auxiliar para gerar código para chamadas de função. */
+/** @brief cria um operando constante. */
+static IROperand* criar_constante(int valor) {
+    IROperand* constante = criar_operando(OPERAND_CONST);
+    constante->data.const_val = valor;
+    return constante;
+}
+
+/** @brief cria um operando associado a um símbolo validado. */
+static IROperand* criar_simbolo(Simbolo* simbolo) {
+    IROperand* operando = criar_operando(OPERAND_SYMBOL);
+    operando->data.symbol = simbolo;
+    return operando;
+}
+
+//================================================================================
+// EXPRESSÕES E CHAMADAS
+//================================================================================
+
+/** @brief gera parâmetros e chamada sem misturar chamadas aninhadas. */
 static IROperand* gerar_ir_call(ASTNode* no) {
-    //1. processa a lista de argumentos
-    ASTNode* arg_list_no = no->filho->proximo_irmao;
-    int arg_count = 0;
-    if (arg_list_no && arg_list_no->node_type == NODE_ARG_LIST) {
-        ASTNode* arg_expr = arg_list_no->filho;
-        while (arg_expr) {
-            IROperand* arg_op_original = gerar_ir_expr(arg_expr);
-            //cria uma copia para a instrucao param
-            emitir(IR_PARAM, NULL, copiar_operando(arg_op_original), NULL);
-            arg_count++;
-            arg_expr = arg_expr->proximo_irmao;
-        }
-    }
-    
-    //2. cria o operando para o nome da funcao (que e um label)
-    IROperand* func_label = criar_operando_label_nome(no->filho->data.string_value);
-    //3. cria o operando para a contagem de argumentos
-    IROperand* arg_count_op = criar_operando(OPERAND_CONST);
-    arg_count_op->data.const_val = arg_count;
-    //4. cria um temporario para armazenar o valor de retorno
-    IROperand* temp_retorno = criar_operando_temporario();
+    IROperand* argumentos[MAX_PARAMETROS] = {0};
+    int quantidade = 0;
+    ASTNode* arg_list = no->filho->proximo_irmao;
 
-    
-    //5. emite a instrucao de chamada
-    emitir(IR_CALL, temp_retorno, func_label, arg_count_op);
-    
-    return temp_retorno; //retorna o ponteiro original do temporario
-}
-
-
-/**
- * @brief Retorna o tipo estático de um nó de expressão.
- * (versao simplificada do 'get_expression_type' do semantic.c)
- */
-static TokenType get_expr_static_type(ASTNode* expr_node) {
-    if (expr_node == NULL) return UNDEF;
-    
-    switch (expr_node->node_type) {
-        //tipos literais
-        case NODE_INTEGER_CONST: return INT;
-        case NODE_CHAR_CONST:    return CHAR;
-        case NODE_STRING_CONST:  return STRINGCONST;
-        
-        //tipo de uma variavel
-        case NODE_ID: {
-            // ALTERAÇÃO: Usa o ponteiro 'symbol' salvo na AST, em vez de buscar na pilha
-            Simbolo* s = (Simbolo*)expr_node->symbol;
-            if (s) {
-                //Se for um array de CHAR, o tipo estático para impressão deve ser STRINGCONST
-                if (s->is_array && s->tipo == CHAR) {
-                    return STRINGCONST;
-                }
-                return s->tipo; //o tipo (int ou char) do simbolo
+    //avalia todas as chamadas aninhadas antes de emitir parâmetros externos
+    if (arg_list != NULL && arg_list->node_type == NODE_ARG_LIST) {
+        ASTNode* argumento = arg_list->filho;
+        while (argumento != NULL) {
+            if (quantidade >= MAX_PARAMETROS) {
+                fprintf(stderr, "Erro fatal: Limite de parametros excedido na IR.\n");
+                exit(EXIT_FAILURE);
             }
-            return UNDEF;
+            argumentos[quantidade++] = gerar_ir_expr(argumento);
+            argumento = argumento->proximo_irmao;
         }
-        
-        //tipo de um acesso a array (e o tipo base do array)
-        case NODE_ARRAY_ACCESS: {
-             // O símbolo está no filho (o ID do array)
-             ASTNode* id = expr_node->filho;
-             Simbolo* s = (Simbolo*)id->symbol;
-             if (s) return s->tipo; //ex: 'int v[10]' -> int
-             return UNDEF;
-        }
-
-        //na sua linguagem, operacoes e chamadas de funcao parecem retornar int
-        case NODE_BINARY_OP:
-        case NODE_CALL:
-            return INT; 
-            
-        default:
-            return UNDEF;
     }
+
+    for (int i = 0; i < quantidade; i++) {
+        emitir(IR_PARAM, NULL, argumentos[i], NULL);
+        liberar_operando(argumentos[i]);
+    }
+
+    IROperand* nome_funcao = criar_operando_label_nome(no->filho->data.string_value);
+    IROperand* numero_argumentos = criar_constante(quantidade);
+    IROperand* retorno = criar_operando_temporario();
+    emitir(IR_CALL, retorno, nome_funcao, numero_argumentos);
+    liberar_operando(nome_funcao);
+    liberar_operando(numero_argumentos);
+    return retorno;
 }
 
+/** @brief gera curto-circuito para os operadores lógicos. */
+static IROperand* gerar_ir_logico(ASTNode* no) {
+    IROperand* resultado = criar_operando_temporario();
+    IROperand* constante_zero = criar_constante(0);
+    IROperand* constante_um = criar_constante(1);
+    IROperand* label_secundario = criar_operando_label_novo();
+    IROperand* label_falso = criar_operando_label_novo();
+    IROperand* label_fim = criar_operando_label_novo();
+    IROperand* esquerdo = gerar_ir_expr(no->filho);
 
-/** @brief função recursiva que percorre a ast e gera a ir para nós de expressão. */
+    if (no->data.op_type == AND) {
+        emitir(IR_IF_FALSE, label_falso, esquerdo, NULL);
+        liberar_operando(esquerdo);
+
+        IROperand* direito = gerar_ir_expr(no->filho->proximo_irmao);
+        emitir(IR_IF_FALSE, label_falso, direito, NULL);
+        liberar_operando(direito);
+        emitir(IR_ASSIGN, resultado, constante_um, NULL);
+        emitir(IR_GOTO, label_fim, NULL, NULL);
+    } else {
+        emitir(IR_IF_FALSE, label_secundario, esquerdo, NULL);
+        liberar_operando(esquerdo);
+        emitir(IR_ASSIGN, resultado, constante_um, NULL);
+        emitir(IR_GOTO, label_fim, NULL, NULL);
+        emitir(IR_LABEL, label_secundario, NULL, NULL);
+
+        IROperand* direito = gerar_ir_expr(no->filho->proximo_irmao);
+        emitir(IR_IF_FALSE, label_falso, direito, NULL);
+        liberar_operando(direito);
+        emitir(IR_ASSIGN, resultado, constante_um, NULL);
+        emitir(IR_GOTO, label_fim, NULL, NULL);
+    }
+
+    emitir(IR_LABEL, label_falso, NULL, NULL);
+    emitir(IR_ASSIGN, resultado, constante_zero, NULL);
+    emitir(IR_LABEL, label_fim, NULL, NULL);
+
+    liberar_operando(constante_zero);
+    liberar_operando(constante_um);
+    liberar_operando(label_secundario);
+    liberar_operando(label_falso);
+    liberar_operando(label_fim);
+    return resultado;
+}
+
+/** @brief gera a ir correspondente a uma expressão. */
 static IROperand* gerar_ir_expr(ASTNode* no) {
     if (no == NULL) return NULL;
 
     switch (no->node_type) {
-        case NODE_INTEGER_CONST: {
-            IROperand* constante = criar_operando(OPERAND_CONST);
-            constante->data.const_val = no->data.int_value;
-            return constante;
-        }
+        case NODE_INTEGER_CONST:
+            return criar_constante((int)no->data.int_value);
 
-        case NODE_CHAR_CONST: {
-            IROperand* constante_char = criar_operando(OPERAND_CONST);
-            //armazena o char como seu valor ascii (int).
-            //o parser armazena o char em data.char_value.
-            constante_char->data.const_val = (int)no->data.char_value;
-            return constante_char;
-        }
+        case NODE_CHAR_CONST:
+            return criar_constante((unsigned char)no->data.char_value);
 
         case NODE_STRING_CONST: {
-            IROperand* string_label = criar_operando_label_novo(); 
+            IROperand* string_label = criar_operando_label_novo();
             string_label->type = OPERAND_STRING_LBL;
-            
-            //armazena o conteudo fora da uniao
-            string_label->string_content = strdup(no->data.string_value);
-            
-            //nao mexe no data.symbol!
+            string_label->string_content = duplicar_string(no->data.string_value);
             return string_label;
         }
 
-        case NODE_ID: {
-            //acesso direto ao símbolo salvo no nó
-            Simbolo* s = (Simbolo*)no->symbol;
-            if (s == NULL) {
-                //se chegou aqui sem símbolo, é erro grave do semantic, mas não deve ocorrer
-                fprintf(stderr, "ERRO FATAL (IR): simbolo '%s' nao linkado na AST.\n", no->data.string_value);
-                return NULL;
+        case NODE_ID:
+            if (no->symbol == NULL) {
+                fprintf(stderr, "Erro fatal: Simbolo '%s' nao foi ligado a AST.\n", no->data.string_value);
+                exit(EXIT_FAILURE);
             }
-            IROperand* var = criar_operando(OPERAND_SYMBOL);
-            var->data.symbol = s;
-            return var;
-        }
+            return criar_simbolo((Simbolo*)no->symbol);
 
         case NODE_ARRAY_ACCESS: {
-            // O símbolo está no nó filho (ID)
-            ASTNode* id_no = no->filho;
-            Simbolo* s = (Simbolo*)id_no->symbol;
-            
-            IROperand* base = criar_operando(OPERAND_SYMBOL);
-            base->data.symbol = s;
-            
-            IROperand* index = gerar_ir_expr(no->filho->proximo_irmao);
-            IROperand* temp = criar_operando_temporario();
-            
-            //se for array de CHAR, usa LOAD_BYTE ---
-            if (s && s->tipo == CHAR) {
-                emitir(IR_LOAD_BYTE, temp, base, index);
-            } else {
-                emitir(IR_LOAD, temp, base, index);
-            }
-            // -----------------------------------------------------
-            
-            return temp;
-        }
-        case NODE_BINARY_OP: {
-            IROperand* arg1 = gerar_ir_expr(no->filho);
-            IROperand* arg2 = gerar_ir_expr(no->filho->proximo_irmao);
-            IROperand* temp = criar_operando_temporario();
-            IROpcode op = UNDEF;
-            switch(no->data.op_type) {
-                case PLUS: op = IR_ADD; break; case MINUS: op = IR_SUB; break;
-                case MUL: op = IR_MUL; break; case DIV: op = IR_DIV; break;
-                case MOD: op = IR_MOD; break; case LT: op = IR_LT; break;
-                case LEQ: op = IR_LEQ; break; case GT: op = IR_GT; break;
-                case GEQ: op = IR_GEQ; break; case EQ: op = IR_EQ; break;
-                case NEQ: op = IR_NEQ; break; case AND: op = IR_AND; break;
-                case OR: op = IR_OR; break; default: break;
-            }
-            emitir(op, temp, arg1, arg2);
-            return temp;
-        }
-        
-        case NODE_CALL: {
-            //uma chamada de funcao usada em uma expressao (ex: z = soma(x,y))
-            //gera o codigo de chamada e retorna o temporario com o resultado.
-            return gerar_ir_call(no);
+            ASTNode* id = no->filho;
+            Simbolo* simbolo = (Simbolo*)id->symbol;
+            IROperand* base = criar_simbolo(simbolo);
+            IROperand* indice = gerar_ir_expr(id->proximo_irmao);
+            IROperand* resultado = criar_operando_temporario();
+            emitir(simbolo->tipo == CHAR ? IR_LOAD_BYTE : IR_LOAD,
+                   resultado, base, indice);
+            liberar_operando(base);
+            liberar_operando(indice);
+            return resultado;
         }
 
-        default: return NULL;
+        case NODE_UNARY_OP: {
+            IROperand* argumento = gerar_ir_expr(no->filho);
+            IROperand* resultado = criar_operando_temporario();
+            emitir(no->data.op_type == MINUS ? IR_NEG : IR_NOT,
+                   resultado, argumento, NULL);
+            liberar_operando(argumento);
+            return resultado;
+        }
+
+        case NODE_BINARY_OP: {
+            if (no->data.op_type == AND || no->data.op_type == OR) {
+                return gerar_ir_logico(no);
+            }
+
+            IROperand* esquerdo = gerar_ir_expr(no->filho);
+            IROperand* direito = gerar_ir_expr(no->filho->proximo_irmao);
+            IROperand* resultado = criar_operando_temporario();
+            IROpcode opcode;
+
+            switch (no->data.op_type) {
+                case PLUS: opcode = IR_ADD; break;
+                case MINUS: opcode = IR_SUB; break;
+                case MUL: opcode = IR_MUL; break;
+                case DIV: opcode = IR_DIV; break;
+                case MOD: opcode = IR_MOD; break;
+                case EQ: opcode = IR_EQ; break;
+                case NEQ: opcode = IR_NEQ; break;
+                case LT: opcode = IR_LT; break;
+                case LEQ: opcode = IR_LEQ; break;
+                case GT: opcode = IR_GT; break;
+                case GEQ: opcode = IR_GEQ; break;
+                default:
+                    fprintf(stderr, "Erro fatal: Operador binario invalido na IR.\n");
+                    exit(EXIT_FAILURE);
+            }
+
+            emitir(opcode, resultado, esquerdo, direito);
+            liberar_operando(esquerdo);
+            liberar_operando(direito);
+            return resultado;
+        }
+
+        case NODE_CALL:
+            return gerar_ir_call(no);
+
+        default:
+            return NULL;
     }
 }
 
-/** @brief função recursiva principal que percorre a ast e gera a ir para instruções. */
+//================================================================================
+// INSTRUÇÕES
+//================================================================================
+
+/** @brief gera a ir correspondente a um nó de instrução. */
 static void gerar_ir_no(ASTNode* no) {
-    if (no == NULL) return;
+    if (no == NULL || no->node_type == NODE_UNDEFINED) return;
 
     switch (no->node_type) {
         case NODE_PROGRAM:
         case NODE_BLOCK: {
-            
-            ASTNode* filho = no->filho;
-            while (filho != NULL) {
+            for (ASTNode* filho = no->filho; filho != NULL; filho = filho->proximo_irmao) {
                 gerar_ir_no(filho);
+            }
+            break;
+        }
+
+        case NODE_FUNCTION_DEF: {
+            ASTNode* id = no->filho->proximo_irmao;
+            funcao_atual = (Simbolo*)id->symbol;
+            temp_counter = 0;
+
+            IROperand* label = criar_operando_label_nome(id->data.string_value);
+            emitir(IR_LABEL, label, NULL, NULL);
+            liberar_operando(label);
+
+            ASTNode* corpo = id->proximo_irmao;
+            if (corpo != NULL && corpo->node_type == NODE_PARAM_LIST) {
+                corpo = corpo->proximo_irmao;
+            }
+            gerar_ir_no(corpo);
+
+            if (funcao_atual != NULL) {
+                funcao_atual->frame_size = alinhar_16(funcao_atual->local_size + temp_counter * 4);
+            }
+            funcao_atual = NULL;
+            break;
+        }
+
+        case NODE_VAR_DECL: {
+            ASTNode* filho = no->filho;
+            while (filho != NULL && filho->node_type != NODE_ASSIGN) {
                 filho = filho->proximo_irmao;
             }
-            
+            gerar_ir_no(filho);
             break;
         }
-        case NODE_FUNCTION_DEF: {
-            IROperand* func_label = criar_operando_label_nome(no->filho->proximo_irmao->data.string_value);
-            emitir(IR_LABEL, func_label, NULL, NULL);
-            ASTNode* corpo_funcao = no->filho;
-            while(corpo_funcao && corpo_funcao->node_type != NODE_BLOCK) {
-                corpo_funcao = corpo_funcao->proximo_irmao;
-            }
-            gerar_ir_no(corpo_funcao);
-            break;
-        }
-        case NODE_VAR_DECL: {
-            ASTNode* assign_no = no->filho;
-            while(assign_no && assign_no->node_type != NODE_ASSIGN) {
-                assign_no = assign_no->proximo_irmao;
-            }
-            if (assign_no) {
-                gerar_ir_no(assign_no);
-            }
-            break;
-        }
+
         case NODE_ASSIGN: {
-            ASTNode* lado_esquerdo = no->filho;
-            ASTNode* lado_direito = lado_esquerdo->proximo_irmao;
-            
-            // --- DETECÇÃO DE ATRIBUIÇÃO DE STRING (IR_STRCPY) ---
-            TokenType t_esq = get_expr_static_type(lado_esquerdo);
-            TokenType t_dir = get_expr_static_type(lado_direito);
+            ASTNode* esquerdo = no->filho;
+            ASTNode* direito = esquerdo->proximo_irmao;
 
-            if (t_esq == STRINGCONST && t_dir == STRINGCONST) {
-                // Caso Especial: nome = "string";
-                IROperand* src = gerar_ir_expr(lado_direito); // Gera o label da string
-                
-                Simbolo* s = (Simbolo*)lado_esquerdo->symbol; // Pega do nó ID
-                IROperand* dest = criar_operando(OPERAND_SYMBOL);
-                dest->data.symbol = s;
-                
-                // Emite nova instrução IR_STRCPY (destino, origem)
-                emitir(IR_STRCPY, dest, copiar_operando(src), NULL);
-                
-                break; // Sai do case, pois já tratamos
+            if (esquerdo->inferred_type == STRINGCONST && direito->inferred_type == STRINGCONST) {
+                IROperand* destino = criar_simbolo((Simbolo*)esquerdo->symbol);
+                IROperand* origem = gerar_ir_expr(direito);
+                emitir(IR_STRCPY, destino, origem, NULL);
+                liberar_operando(destino);
+                liberar_operando(origem);
+                break;
             }
-            // ----------------------------------------------------
-            
-            //src e o ponteiro original (ex: t0)
-            IROperand* src = gerar_ir_expr(lado_direito); 
 
-            if (lado_esquerdo->node_type == NODE_ID) {
-                Simbolo* s = (Simbolo*)lado_esquerdo->symbol;
-                IROperand* dest = criar_operando(OPERAND_SYMBOL);
-                dest->data.symbol = s;
-                //usa uma copia de 'src' (t0) para esta instrucao
-                emitir(IR_ASSIGN, dest, copiar_operando(src), NULL); 
-            } 
-            else if (lado_esquerdo->node_type == NODE_ARRAY_ACCESS) {
-                ASTNode* id = lado_esquerdo->filho;
-                Simbolo* s = (Simbolo*)id->symbol;
-                
-                IROperand* base = criar_operando(OPERAND_SYMBOL);
-                base->data.symbol = s;
-                IROperand* index = gerar_ir_expr(lado_esquerdo->filho->proximo_irmao);
-                
-                // --- CORRECAO: Se for CHAR, usa STORE_BYTE ---
-                if (s && s->tipo == CHAR) {
-                    emitir(IR_STORE_BYTE, base, copiar_operando(src), index); 
-                } else {
-                    emitir(IR_STORE, base, copiar_operando(src), index); 
-                }
-                // ---------------------------------------------
+            IROperand* origem = gerar_ir_expr(direito);
+            if (esquerdo->node_type == NODE_ID) {
+                IROperand* destino = criar_simbolo((Simbolo*)esquerdo->symbol);
+                emitir(IR_ASSIGN, destino, origem, NULL);
+                liberar_operando(destino);
+            } else {
+                ASTNode* id = esquerdo->filho;
+                Simbolo* simbolo = (Simbolo*)id->symbol;
+                IROperand* base = criar_simbolo(simbolo);
+                IROperand* indice = gerar_ir_expr(id->proximo_irmao);
+                emitir(simbolo->tipo == CHAR ? IR_STORE_BYTE : IR_STORE,
+                       base, origem, indice);
+                liberar_operando(base);
+                liberar_operando(indice);
             }
+            liberar_operando(origem);
             break;
         }
+
         case NODE_RETURN: {
-            IROperand* ret_val = gerar_ir_expr(no->filho);
-            //usa uma copia do valor de retorno
-            emitir(IR_RETURN, NULL, copiar_operando(ret_val), NULL);
+            IROperand* valor = gerar_ir_expr(no->filho);
+            emitir(IR_RETURN, NULL, valor, NULL);
+            liberar_operando(valor);
             break;
         }
+
         case NODE_IF: {
-            ASTNode* cond_no = no->filho;
-            ASTNode* then_no = cond_no->proximo_irmao;
-            ASTNode* else_no = then_no ? then_no->proximo_irmao : NULL;
-
+            ASTNode* condicao = no->filho;
+            ASTNode* bloco_then = condicao->proximo_irmao;
+            ASTNode* bloco_else = bloco_then != NULL ? bloco_then->proximo_irmao : NULL;
             IROperand* label_else = criar_operando_label_novo();
-            IROperand* label_fim_if = criar_operando_label_novo();
-            
-            IROperand* cond_result = gerar_ir_expr(cond_no);
-            
-            //usa uma copia do resultado da condicao
-            emitir(IR_IF_FALSE, copiar_operando(label_else), copiar_operando(cond_result), NULL);
-            
-            gerar_ir_no(then_no);
-            emitir(IR_GOTO, copiar_operando(label_fim_if), NULL, NULL);
+            IROperand* label_fim = criar_operando_label_novo();
+            IROperand* resultado = gerar_ir_expr(condicao);
 
-            emitir(IR_LABEL, label_else, NULL, NULL); //usa o original
-            if (else_no) {
-                gerar_ir_no(else_no);
+            emitir(IR_IF_FALSE, bloco_else != NULL ? label_else : label_fim, resultado, NULL);
+            liberar_operando(resultado);
+            gerar_ir_no(bloco_then);
+
+            if (bloco_else != NULL) {
+                emitir(IR_GOTO, label_fim, NULL, NULL);
+                emitir(IR_LABEL, label_else, NULL, NULL);
+                gerar_ir_no(bloco_else);
             }
-            
-            emitir(IR_LABEL, label_fim_if, NULL, NULL); //usa o original
+            emitir(IR_LABEL, label_fim, NULL, NULL);
+            liberar_operando(label_else);
+            liberar_operando(label_fim);
             break;
         }
+
         case NODE_FOR: {
-            ASTNode* init_no = no->filho;
-            ASTNode* cond_no = init_no ? init_no->proximo_irmao : NULL;
-            ASTNode* incr_no = cond_no ? cond_no->proximo_irmao : NULL;
-            ASTNode* body_no = incr_no ? incr_no->proximo_irmao : NULL;
+            ASTNode* inicializacao = no->filho;
+            ASTNode* condicao = inicializacao->proximo_irmao;
+            ASTNode* incremento = condicao->proximo_irmao;
+            ASTNode* corpo = incremento->proximo_irmao;
+            IROperand* label_inicio = criar_operando_label_novo();
+            IROperand* label_fim = criar_operando_label_novo();
 
-            IROperand* label_inicio_loop = criar_operando_label_novo();
-            IROperand* label_fim_loop = criar_operando_label_novo();
-
-            gerar_ir_no(init_no);
-            emitir(IR_LABEL, label_inicio_loop, NULL, NULL); //usa o original
-
-            if (cond_no && cond_no->node_type != NODE_UNDEFINED) {
-                IROperand* cond_result = gerar_ir_expr(cond_no);
-                //usa copias
-                emitir(IR_IF_FALSE, copiar_operando(label_fim_loop), copiar_operando(cond_result), NULL);
+            gerar_ir_no(inicializacao);
+            emitir(IR_LABEL, label_inicio, NULL, NULL);
+            if (condicao->node_type != NODE_UNDEFINED) {
+                IROperand* resultado = gerar_ir_expr(condicao);
+                emitir(IR_IF_FALSE, label_fim, resultado, NULL);
+                liberar_operando(resultado);
             }
-
-            gerar_ir_no(body_no);
-            gerar_ir_no(incr_no);
-
-            emitir(IR_GOTO, copiar_operando(label_inicio_loop), NULL, NULL); //usa copia
-            emitir(IR_LABEL, label_fim_loop, NULL, NULL); //usa o original
+            gerar_ir_no(corpo);
+            gerar_ir_no(incremento);
+            emitir(IR_GOTO, label_inicio, NULL, NULL);
+            emitir(IR_LABEL, label_fim, NULL, NULL);
+            liberar_operando(label_inicio);
+            liberar_operando(label_fim);
             break;
         }
 
         case NODE_PRINT: {
-            ASTNode* arg_node = no->filho;
-            if (arg_node == NULL) break; //'print()' sem argumento, nao faz nada
-
-            //1. descobre o tipo estatico do argumento (int, char, etc.)
-            TokenType arg_type = get_expr_static_type(arg_node);
-            
-            //2. gera a ir para o argumento (ex: z, 'a', "ola")
-            IROperand* arg_op = gerar_ir_expr(arg_node);
-            if (arg_op == NULL) break; //falha ao gerar expressao
-
-            //3. emite o opcode de print correto baseado no tipo
-            switch (arg_type) {
-                case INT:
-                case INTEGERCONST: //se for uma variavel int ou um literal int
-                    //usa a copia, por seguranca (como em ir_assign)
-                    emitir(IR_PRINT_INT, NULL, copiar_operando(arg_op), NULL);
-                    break;
-                    
-                case CHAR:
-                case CHARCONST: //se for uma variavel char ou um literal char
-                    emitir(IR_PRINT_CHAR, NULL, copiar_operando(arg_op), NULL);
-                    break;
-                    
-                case STRINGCONST: 
-                    //Usamos copiar_operando para suportar tanto literais quanto variáveis
-                    emitir(IR_PRINT_STRING, NULL, copiar_operando(arg_op), NULL);
-                    break;
-                    
-                default:
-                    //nao faz nada se tentar printar um tipo desconhecido (ex: um array)
-                    break;
-            }
-            
+            IROperand* argumento = gerar_ir_expr(no->filho);
+            IROpcode opcode = IR_PRINT_INT;
+            if (no->filho->inferred_type == CHAR) opcode = IR_PRINT_CHAR;
+            if (no->filho->inferred_type == STRINGCONST) opcode = IR_PRINT_STRING;
+            emitir(opcode, NULL, argumento, NULL);
+            liberar_operando(argumento);
             break;
         }
+
         case NODE_CALL: {
-            //este e um 'call' onde o valor de retorno nao e usado.
-            //(ex: uma funcao que so tem efeitos colaterais)
-            gerar_ir_call(no);
+            IROperand* retorno = gerar_ir_call(no);
+            liberar_operando(retorno);
             break;
         }
 
@@ -470,14 +459,13 @@ static void gerar_ir_no(ASTNode* no) {
     }
 }
 
-/** @brief função pública que inicia a geração de código intermediário. */
+/** @brief inicia a geração da lista de código intermediário. */
 IR_Instruction* gerar_codigo_intermediario(ASTNode* raiz, PilhaTabelasSimbolos* pilha) {
+    (void)pilha;
     temp_counter = 0;
     label_counter = 0;
+    funcao_atual = NULL;
     ir_list_head = ir_list_tail = NULL;
-    
-
     gerar_ir_no(raiz);
-    
     return ir_list_head;
 }

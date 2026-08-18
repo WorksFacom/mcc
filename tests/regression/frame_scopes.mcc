@@ -1,0 +1,9 @@
+int main() {
+    int externo = 7;
+    if (1) {
+        int interno = 9;
+        print(interno);
+    }
+    print(externo);
+    return 0;
+}

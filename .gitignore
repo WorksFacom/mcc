@@ -93,3 +93,8 @@ tokens.txt
 
 # Remove vscode
 .vscode
+
+# Local academic review documents
+/doc/CORRECTIONS_PLAN.md
+/doc/IMPLEMENTATION_INVARIANTS.md
+/doc/UPGRADE.md

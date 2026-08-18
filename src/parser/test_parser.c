@@ -55,6 +55,7 @@ void imprimir_ast(ASTNode *no, int indent_level) {
         case NODE_CHAR_CONST: printf("CHAR_CONST (Valor: %c)\n", no->data.char_value); break;
         case NODE_STRING_CONST: printf("STRING_CONST (Valor: %s)\n", no->data.string_value); break;
         case NODE_BINARY_OP: printf("BINARY_OP (%s)\n", token_name(no->data.op_type)); break;
+        case NODE_UNARY_OP: printf("UNARY_OP (%s)\n", token_name(no->data.op_type)); break;
         case NODE_UNDEFINED: printf("EMPTY_STATEMENT\n"); break;
         default: printf("Noh desconhecido: %d\n", no->node_type); break;
     }

@@ -1,278 +1,300 @@
 /**
  * @file scanner.c
- * @brief implementação do analisador léxico para a linguagem simple c.
- *
- * este arquivo contém as funções para ler o arquivo fonte, ignorar espaços e comentários,
- * e gerar tokens a partir de um arquivo de entrada. o analisador léxico é a primeira
- * etapa do compilador, convertendo o código em uma sequência de tokens.
+ * @brief implementação do analisador léxico para a linguagem Micro C.
  */
-#include <stdio.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include "scanner.h"
 
-/** @brief arquivo de entrada do arquivo fonte.
- *
- * ponteiro para o arquivo aberto que contém o código simple c a ser analisado.
- */
-FILE *arquivo_fonte;
-/** @brief contador da linha atual no arquivo fonte.
- *
- * rastreia a linha atual para relatar erros com precisão, inicializado em 1.
- */
+FILE* arquivo_fonte = NULL;
 int linha_atual = 1;
 
-//funções auxiliares internas (não precisam estar no .h)
-static char prox_char();
-static char ignora_espacos_e_comentarios();
+static int erro_comentario = 0;
 
-/** @brief lê o próximo caractere do arquivo de entrada. */
-static char prox_char() {
+/** @brief lê um byte preservando o valor especial EOF. */
+static int prox_char(void) {
     return fgetc(arquivo_fonte);
 }
 
-/** @brief inicializa o analisador léxico com o arquivo de entrada. */
-int inicializar_scanner(const char *nome_arquivo) {
-    arquivo_fonte = fopen(nome_arquivo,"r");
-    if(arquivo_fonte == NULL){
-        printf("erro ao abrir o arquivo %s\n",nome_arquivo);
+/** @brief devolve um byte válido ao fluxo de entrada. */
+static void devolver_char(int c) {
+    if (c != EOF) ungetc(c, arquivo_fonte);
+}
+
+/** @brief cria um token inicializado para a linha atual. */
+static Token criar_token(void) {
+    Token token = {0};
+    token.tipo = UNDEF;
+    token.linha = linha_atual;
+    return token;
+}
+
+/** @brief define uma mensagem curta para um token inválido. */
+static Token token_erro(const char* mensagem, int linha) {
+    Token token = criar_token();
+    token.linha = linha;
+    snprintf(token.lexema, sizeof(token.lexema), "%s", mensagem);
+    return token;
+}
+
+/** @brief inicializa o scanner com um novo arquivo-fonte. */
+int inicializar_scanner(const char* nome_arquivo) {
+    finalizar_scanner();
+    arquivo_fonte = fopen(nome_arquivo, "r");
+    if (arquivo_fonte == NULL) {
+        fprintf(stderr, "Erro ao abrir o arquivo %s\n", nome_arquivo);
         return -1;
     }
     linha_atual = 1;
-    return 0; 
+    erro_comentario = 0;
+    return 0;
 }
 
-/** @brief avança no arquivo até encontrar um caractere que não seja espaço ou comentário. */
-static char ignora_espacos_e_comentarios() {
-    char c = prox_char();
+/** @brief fecha o arquivo-fonte e reinicializa o estado do scanner. */
+void finalizar_scanner(void) {
+    if (arquivo_fonte != NULL) fclose(arquivo_fonte);
+    arquivo_fonte = NULL;
+    linha_atual = 1;
+    erro_comentario = 0;
+}
+
+/** @brief ignora espaços e comentários, retornando o primeiro byte útil. */
+static int ignorar_espacos_e_comentarios(void) {
+    int c = prox_char();
+
     while (1) {
-        //ignora espaços em branco
-        while (isspace(c)) {
+        while (c != EOF && isspace((unsigned char)c)) {
             if (c == '\n') linha_atual++;
             c = prox_char();
         }
 
-        //verifica comentários
-        if (c == '/') {
-            char next_c = prox_char();
-            if (next_c == '/') { //comentário de linha única
-                do {
-                    c = prox_char();
-                } while (c != '\n' && c != EOF);
-            } else if (next_c == '*') { //comentário de múltiplas linhas
-                char prev_c = '\0';
-                do {
-                    prev_c = c;
-                    c = prox_char();
-                    if (c == '\n') linha_atual++;
-                } while (!(prev_c == '*' && c == '/') && c != EOF);
-                c = prox_char(); //consome o char após o '*/'
-            } else {
-                //não é um comentário, devolve o caractere e retorna a barra
-                ungetc(next_c, arquivo_fonte);
-                return c;
+        if (c != '/') return c;
+
+        int seguinte = prox_char();
+        if (seguinte == '/') {
+            while ((c = prox_char()) != '\n' && c != EOF) {
+                //consome o comentário até o final da linha
             }
-        } else {
-            //não é espaço nem comentário, retorna o caractere encontrado
-            return c;
+            if (c == '\n') linha_atual++;
+            c = prox_char();
+            continue;
         }
+
+        if (seguinte == '*') {
+            int anterior = 0;
+            c = prox_char();
+            while (c != EOF && !(anterior == '*' && c == '/')) {
+                if (c == '\n') linha_atual++;
+                anterior = c;
+                c = prox_char();
+            }
+            if (c == EOF) {
+                erro_comentario = 1;
+                return EOF;
+            }
+            c = prox_char();
+            continue;
+        }
+
+        devolver_char(seguinte);
+        return c;
     }
 }
 
-/** @brief gera o próximo token do arquivo fonte. */
-Token proximo_token() {
-    Token token;
-    token.tipo = UNDEF;
-    token.lexema[0] = '\0';
+/** @brief classifica um identificador ou palavra reservada. */
+static Token ler_identificador(int primeiro, int linha) {
+    Token token = criar_token();
+    token.linha = linha;
+    size_t tamanho = 0;
+    int c = primeiro;
 
-    char c = ignora_espacos_e_comentarios();
-    token.linha = linha_atual;
+    while (c != EOF && (isalnum((unsigned char)c) || c == '_')) {
+        if (tamanho + 1 < sizeof(token.lexema)) token.lexema[tamanho] = (char)c;
+        tamanho++;
+        c = prox_char();
+    }
+    devolver_char(c);
 
-    //fim de arquivo
+    if (tamanho > MAX_ID_LEN) {
+        return token_erro("Identificador excede o limite", linha);
+    }
+    token.lexema[tamanho] = '\0';
+
+    if (strcmp(token.lexema, "main") == 0) token.tipo = MAIN;
+    else if (strcmp(token.lexema, "if") == 0) token.tipo = IF;
+    else if (strcmp(token.lexema, "else") == 0) token.tipo = ELSE;
+    else if (strcmp(token.lexema, "for") == 0) token.tipo = FOR;
+    else if (strcmp(token.lexema, "return") == 0) token.tipo = RETURN;
+    else if (strcmp(token.lexema, "int") == 0) token.tipo = INT;
+    else if (strcmp(token.lexema, "char") == 0) token.tipo = CHAR;
+    else if (strcmp(token.lexema, "print") == 0) token.tipo = PRINT;
+    else token.tipo = ID;
+    return token;
+}
+
+/** @brief lê uma constante inteira sem incorporar seu sinal. */
+static Token ler_inteiro(int primeiro, int linha) {
+    Token token = criar_token();
+    token.linha = linha;
+    size_t tamanho = 0;
+    int c = primeiro;
+
+    while (c != EOF && isdigit((unsigned char)c)) {
+        if (tamanho + 1 < sizeof(token.lexema)) token.lexema[tamanho] = (char)c;
+        tamanho++;
+        c = prox_char();
+    }
+    devolver_char(c);
+
+    if (tamanho > (size_t)(MAX_INT_LEN - 2)) {
+        return token_erro("Constante inteira excede o limite", linha);
+    }
+    token.lexema[tamanho] = '\0';
+    token.tipo = INTEGERCONST;
+    return token;
+}
+
+/** @brief converte uma sequência de escape em seu byte correspondente. */
+static int decodificar_escape(int c, int* valido) {
+    *valido = 1;
+    switch (c) {
+        case '0': return '\0';
+        case 'n': return '\n';
+        case 't': return '\t';
+        case '\\': return '\\';
+        case '\'': return '\'';
+        case '"': return '"';
+        default:
+            *valido = 0;
+            return c;
+    }
+}
+
+/** @brief lê uma constante de caractere, incluindo escapes conhecidos. */
+static Token ler_caractere(int linha) {
+    Token token = criar_token();
+    token.linha = linha;
+    int c = prox_char();
+    int valor = c;
+    int valido = 1;
+
+    if (c == '\\') valor = decodificar_escape(prox_char(), &valido);
+    int fechamento = prox_char();
+    if (!valido || c == EOF || c == '\n' || fechamento != '\'') {
+        if (c == '\n' || fechamento == '\n') linha_atual++;
+        return token_erro("Constante de caractere invalida", linha);
+    }
+
+    token.tipo = CHARCONST;
+    token.lexema[0] = (char)valor;
+    token.lexema[1] = '\0';
+    return token;
+}
+
+/** @brief lê e decodifica uma string literal. */
+static Token ler_string(int linha) {
+    Token token = criar_token();
+    token.linha = linha;
+    size_t tamanho = 0;
+    int c = prox_char();
+
+    while (c != '"' && c != '\n' && c != EOF) {
+        int valor = c;
+        if (c == '\\') {
+            int valido = 1;
+            int escape = prox_char();
+            valor = decodificar_escape(escape, &valido);
+            if (!valido || valor == '\0') {
+                return token_erro("Escape invalido em string", linha);
+            }
+        }
+
+        if (tamanho + 1 >= sizeof(token.lexema) || tamanho + 1 >= MAX_STR_LEN) {
+            while (c != '"' && c != '\n' && c != EOF) c = prox_char();
+            if (c == '\n') linha_atual++;
+            return token_erro("String excede o limite", linha);
+        }
+        token.lexema[tamanho++] = (char)valor;
+        c = prox_char();
+    }
+
+    if (c != '"') {
+        if (c == '\n') linha_atual++;
+        return token_erro("String nao terminada", linha);
+    }
+    token.lexema[tamanho] = '\0';
+    token.tipo = STRINGCONST;
+    return token;
+}
+
+/** @brief gera o próximo token do arquivo-fonte. */
+Token proximo_token(void) {
+    int c = ignorar_espacos_e_comentarios();
+    int linha = linha_atual;
+    Token token = criar_token();
+    token.linha = linha;
+
+    if (erro_comentario) return token_erro("Comentario de bloco nao terminado", linha);
     if (c == EOF) {
         token.tipo = END_OF_FILE;
-        strcpy(token.lexema, "EOF");
+        snprintf(token.lexema, sizeof(token.lexema), "EOF");
         return token;
     }
+    if (isalpha((unsigned char)c) || c == '_') return ler_identificador(c, linha);
+    if (isdigit((unsigned char)c)) return ler_inteiro(c, linha);
+    if (c == '\'') return ler_caractere(linha);
+    if (c == '"') return ler_string(linha);
 
-    //identificadores e palavras-chave
-    if (isalpha(c) || c == '_') {
-        char buffer[101];
-        int i = 0;
-        do {
-            buffer[i++] = c;
-            c = prox_char();
-        } while ((isalnum(c) || c == '_') && i < 100);
-        ungetc(c, arquivo_fonte);
-        buffer[i] = '\0';
-
-        if (strcmp(buffer, "main") == 0) token.tipo = MAIN;
-        else if (strcmp(buffer, "if") == 0) token.tipo = IF;
-        else if (strcmp(buffer, "else") == 0) token.tipo = ELSE;
-        else if (strcmp(buffer, "for") == 0) token.tipo = FOR;
-        else if (strcmp(buffer, "return") == 0) token.tipo = RETURN;
-        else if (strcmp(buffer, "int") == 0) token.tipo = INT;
-        else if (strcmp(buffer, "char") == 0) token.tipo = CHAR;
-        else if (strcmp(buffer, "print") == 0) token.tipo = PRINT;
-        else token.tipo = ID;
-        strcpy(token.lexema, buffer);
-        return token;
-    }
-
-    //números inteiros (positivos)
-    if (isdigit(c)) {
-        char buffer[101];
-        int i = 0;
-        do {
-            buffer[i++] = c;
-            c = prox_char();
-        } while (isdigit(c) && i < 100);
-        ungetc(c, arquivo_fonte);
-        buffer[i] = '\0';
-        token.tipo = INTEGERCONST;
-        strcpy(token.lexema, buffer);
-        return token;
-    }
-
-    //constantes de caractere (ATUALIZADO PARA SUPORTAR ESCAPE \0, \n, etc)
-    if (c == '\'') {
-        char char_val = 0;
-        c = prox_char();
-        
-        if (c == '\\') {
-            // Sequência de escape detectada
-            char next = prox_char();
-            if (next == '0') char_val = '\0';
-            else if (next == 'n') char_val = '\n';
-            else if (next == 't') char_val = '\t';
-            else if (next == '\\') char_val = '\\';
-            else if (next == '\'') char_val = '\'';
-            else char_val = next; // default
-        } else {
-            // Caractere normal
-            char_val = c;
-        }
-
-        // Verifica fechamento
-        if (prox_char() == '\'') {
-            token.tipo = CHARCONST;
-            token.lexema[0] = char_val;
-            token.lexema[1] = '\0';
-            return token;
-        }
-        
-        // Se chegou aqui, é erro (não fechou aspas)
-        strcpy(token.lexema, "'"); 
-        token.tipo = UNDEF;
-        return token;
-    }
-
-    //reconhecer strings
-    if (c == '"') {
-        char buffer[101];
-        int i = 0;
-        c = prox_char(); //pula a aspa de abertura
-        
-        while (c != '"' && c != '\n' && c != EOF && i < 100) {
-            buffer[i++] = c;
-            c = prox_char();
-        }
-        buffer[i] = '\0'; //finaliza a string
-
-        if (c == '"') { //encontrou a aspa de fechamento
-            token.tipo = STRINGCONST;
-            strcpy(token.lexema, buffer);
-        } else { //string não terminada
-            token.tipo = UNDEF;
-            strcpy(token.lexema, "String nao terminada");
-        }
-        return token;
-    }
-    
-    //operadores e outros símbolos
-    char next_c;
-    switch(c) {
+    int seguinte;
+    switch (c) {
         case '=':
-            next_c = prox_char();
-            if (next_c == '=') { token.tipo = EQ; strcpy(token.lexema, "=="); }
-            else { ungetc(next_c, arquivo_fonte); token.tipo = ASSIGN; strcpy(token.lexema, "="); }
+            seguinte = prox_char();
+            if (seguinte == '=') { token.tipo = EQ; strcpy(token.lexema, "=="); }
+            else { devolver_char(seguinte); token.tipo = ASSIGN; strcpy(token.lexema, "="); }
             break;
         case '!':
-            next_c = prox_char();
-            if (next_c == '=') { token.tipo = NEQ; strcpy(token.lexema, "!="); }
-            else { ungetc(next_c, arquivo_fonte); token.tipo = NOT; strcpy(token.lexema, "!"); }
+            seguinte = prox_char();
+            if (seguinte == '=') { token.tipo = NEQ; strcpy(token.lexema, "!="); }
+            else { devolver_char(seguinte); token.tipo = NOT; strcpy(token.lexema, "!"); }
             break;
         case '<':
-            next_c = prox_char();
-            if (next_c == '=') { token.tipo = LEQ; strcpy(token.lexema, "<="); }
-            else { ungetc(next_c, arquivo_fonte); token.tipo = LT; strcpy(token.lexema, "<"); }
+            seguinte = prox_char();
+            if (seguinte == '=') { token.tipo = LEQ; strcpy(token.lexema, "<="); }
+            else { devolver_char(seguinte); token.tipo = LT; strcpy(token.lexema, "<"); }
             break;
         case '>':
-            next_c = prox_char();
-            if (next_c == '=') { token.tipo = GEQ; strcpy(token.lexema, ">="); }
-            else { ungetc(next_c, arquivo_fonte); token.tipo = GT; strcpy(token.lexema, ">"); }
+            seguinte = prox_char();
+            if (seguinte == '=') { token.tipo = GEQ; strcpy(token.lexema, ">="); }
+            else { devolver_char(seguinte); token.tipo = GT; strcpy(token.lexema, ">"); }
             break;
-        case '-':
-            next_c = prox_char();
-            if (isdigit(next_c)) { //é um número negativo
-                char buffer[101];
-                buffer[0] = c;
-                int i = 1;
-                do {
-                    buffer[i++] = next_c;
-                    next_c = prox_char();
-                } while (isdigit(next_c) && i < 100);
-                ungetc(next_c, arquivo_fonte);
-                buffer[i] = '\0';
-                token.tipo = INTEGERCONST;
-                strcpy(token.lexema, buffer);
-            } else { //é o operador MINUS
-                ungetc(next_c, arquivo_fonte);
-                token.tipo = MINUS;
-                strcpy(token.lexema, "-");
-            }
-            break;
-        // suporte a operadores lógicos && e ||
         case '&':
-            next_c = prox_char();
-            if (next_c == '&') { 
-                token.tipo = AND; 
-                strcpy(token.lexema, "&&"); 
-            } else { 
-                ungetc(next_c, arquivo_fonte); 
-                token.tipo = UNDEF; 
-                token.lexema[0] = '&'; token.lexema[1] = '\0';
-            }
+            seguinte = prox_char();
+            if (seguinte == '&') { token.tipo = AND; strcpy(token.lexema, "&&"); }
+            else { devolver_char(seguinte); token.lexema[0] = '&'; }
             break;
         case '|':
-            next_c = prox_char();
-            if (next_c == '|') { 
-                token.tipo = OR; 
-                strcpy(token.lexema, "||"); 
-            } else { 
-                ungetc(next_c, arquivo_fonte); 
-                token.tipo = UNDEF;
-                token.lexema[0] = '|'; token.lexema[1] = '\0';
-            }
+            seguinte = prox_char();
+            if (seguinte == '|') { token.tipo = OR; strcpy(token.lexema, "||"); }
+            else { devolver_char(seguinte); token.lexema[0] = '|'; }
             break;
-        case '+': strcpy(token.lexema, "+"); token.tipo = PLUS; break;
-        case '*': strcpy(token.lexema, "*"); token.tipo = MUL; break;
-        case '/': strcpy(token.lexema, "/"); token.tipo = DIV; break;
-        case '%': strcpy(token.lexema, "%"); token.tipo = MOD; break;
-        case ';': strcpy(token.lexema, ";"); token.tipo = SEMICOLON; break;
-        case ',': strcpy(token.lexema, ","); token.tipo = COMMA; break;
-        case '(': strcpy(token.lexema, "("); token.tipo = LPAREN; break;
-        case ')': strcpy(token.lexema, ")"); token.tipo = RPAREN; break;
-        case '{': strcpy(token.lexema, "{"); token.tipo = LBRACE; break;
-        case '}': strcpy(token.lexema, "}"); token.tipo = RBRACE; break;
-        case '[': strcpy(token.lexema, "["); token.tipo = LBRACKET; break;
-        case ']': strcpy(token.lexema, "]"); token.tipo = RBRACKET; break;
+        case '+': token.tipo = PLUS; strcpy(token.lexema, "+"); break;
+        case '-': token.tipo = MINUS; strcpy(token.lexema, "-"); break;
+        case '*': token.tipo = MUL; strcpy(token.lexema, "*"); break;
+        case '/': token.tipo = DIV; strcpy(token.lexema, "/"); break;
+        case '%': token.tipo = MOD; strcpy(token.lexema, "%"); break;
+        case ';': token.tipo = SEMICOLON; strcpy(token.lexema, ";"); break;
+        case ',': token.tipo = COMMA; strcpy(token.lexema, ","); break;
+        case '(': token.tipo = LPAREN; strcpy(token.lexema, "("); break;
+        case ')': token.tipo = RPAREN; strcpy(token.lexema, ")"); break;
+        case '{': token.tipo = LBRACE; strcpy(token.lexema, "{"); break;
+        case '}': token.tipo = RBRACE; strcpy(token.lexema, "}"); break;
+        case '[': token.tipo = LBRACKET; strcpy(token.lexema, "["); break;
+        case ']': token.tipo = RBRACKET; strcpy(token.lexema, "]"); break;
         default:
-            token.lexema[0] = c;
+            token.lexema[0] = (char)c;
             token.lexema[1] = '\0';
-            token.tipo = UNDEF;
             break;
     }
-
     return token;
 }

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "scanner/scanner.h"
 #include "parser/parser.h"
 #include "semantic/semantic.h"
@@ -29,6 +30,16 @@ void salvar_ast(ASTNode* arvore, bool verbose);
 void imprimir_ir(IR_Instruction* ir_head);
 void salvar_ir_em_arquivo(IR_Instruction* ir_head, bool verbose); 
 int executar_analise_lexica(const char* nome_arquivo, TokenList* lista);
+static void imprimir_operando_ir(FILE* saida, IROperand* operando);
+static void imprimir_uso(const char* programa);
+
+/** @brief imprime a sintaxe aceita pela interface de linha de comando. */
+static void imprimir_uso(const char* programa) {
+    fprintf(stderr,
+            "Uso: %s [--scan|--parse|--semantic|--gen-ir|--gen-asm] "
+            "<arquivo.mcc> [-o arquivo.s]\n",
+            programa);
+}
 
 /**
  * @brief orquestra a fase de análise léxica.
@@ -44,10 +55,12 @@ int executar_analise_lexica(const char* nome_arquivo, TokenList* lista) {
         adicionar_token(lista, token); //adiciona o token à lista em memória
         if (token.tipo == UNDEF) {
             fprintf(stderr, "Erro Lexico: Token indefinido '%s' encontrado na linha %d\n", token.lexema, token.linha);
+            finalizar_scanner();
             return -1;
         }
     } while (token.tipo != END_OF_FILE);
 
+    finalizar_scanner();
     return 0;
 }
 
@@ -55,29 +68,60 @@ int executar_analise_lexica(const char* nome_arquivo, TokenList* lista) {
  * @brief ponto de entrada principal do compilador.
  */
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
+    const char* modo = "completo";
+    const char* nome_arquivo = NULL;
+    const char* saida_solicitada = NULL;
+    bool modo_definido = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0) {
+            if (++i >= argc || saida_solicitada != NULL) {
+                imprimir_uso(argv[0]);
+                return EXIT_FAILURE;
+            }
+            saida_solicitada = argv[i];
+        } else if (strcmp(argv[i], "--scan") == 0 ||
+                   strcmp(argv[i], "--parse") == 0 ||
+                   strcmp(argv[i], "--semantic") == 0 ||
+                   strcmp(argv[i], "--gen-ir") == 0 ||
+                   strcmp(argv[i], "--gen-asm") == 0) {
+            if (modo_definido) {
+                fprintf(stderr, "Erro: Mais de um modo de compilacao foi informado.\n");
+                return EXIT_FAILURE;
+            }
+            modo = argv[i];
+            modo_definido = true;
+        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            imprimir_uso(argv[0]);
+            return EXIT_SUCCESS;
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "Erro: Opcao desconhecida '%s'.\n", argv[i]);
+            imprimir_uso(argv[0]);
+            return EXIT_FAILURE;
+        } else if (nome_arquivo == NULL) {
+            nome_arquivo = argv[i];
+        } else {
+            fprintf(stderr, "Erro: Mais de um arquivo fonte foi informado.\n");
+            return EXIT_FAILURE;
+        }
+    }
+
+    if (nome_arquivo == NULL) {
         fprintf(stderr, "Erro: Arquivo fonte nao especificado.\n");
-        fprintf(stderr, "Uso: %s [--scan|--parse|--semantic|--gen-ir|--gen-asm] <arquivo_fonte.mcc>\n", argv[0]);
-        return -1;
+        imprimir_uso(argv[0]);
+        return EXIT_FAILURE;
     }
-
-    //determina o modo de operação e o nome do arquivo
-    char* modo = "completo";
-    char* nome_arquivo = argv[1];
-
-    
-    if (argc > 2) {
-        modo = argv[1];
-        nome_arquivo = argv[2];
+    if (saida_solicitada != NULL && strcmp(modo, "--gen-asm") != 0 && strcmp(modo, "completo") != 0) {
+        fprintf(stderr, "Erro: A opcao -o so pode ser usada na geracao de assembly.\n");
+        return EXIT_FAILURE;
     }
-    
     
     //fase 1: análise léxica
     TokenList tokens;
-    inicializar_token_list(&tokens, 100);
+    if (inicializar_token_list(&tokens, TOKEN_LIST) != 0) return EXIT_FAILURE;
     if (executar_analise_lexica(nome_arquivo, &tokens) != 0) {
         liberar_token_list(&tokens);
-        return -1; //encerra se houver erro léxico
+        return EXIT_FAILURE; //encerra se houver erro léxico
     }
     //salva o arquivo de tokens silenciosamente em todos os modos, exceto 'scan'
     if (strcmp(modo, "--scan") != 0) {
@@ -158,20 +202,28 @@ int main(int argc, char* argv[]) {
 
     //fase 5: geração de código assembly
     //define o nome do arquivo de saída (ex: teste.cmm -> teste.s)
-    char nome_arquivo_asm[100];
-    strncpy(nome_arquivo_asm, nome_arquivo, sizeof(nome_arquivo_asm) - 2);
-    char* ponto = strrchr(nome_arquivo_asm, '.');
-    if (ponto) {
-        *ponto = '\0'; //remove a extensão .cmm
+    char nome_arquivo_asm[MAX_PATH_LEN];
+    if (saida_solicitada != NULL) {
+        if (snprintf(nome_arquivo_asm, sizeof(nome_arquivo_asm), "%s", saida_solicitada) >= (int)sizeof(nome_arquivo_asm)) {
+            fprintf(stderr, "Erro: Caminho de saida excede o limite suportado.\n");
+            return EXIT_FAILURE;
+        }
+    } else {
+        if (snprintf(nome_arquivo_asm, sizeof(nome_arquivo_asm), "%s", nome_arquivo) >= (int)sizeof(nome_arquivo_asm) - 2) {
+            fprintf(stderr, "Erro: Caminho de entrada excede o limite suportado.\n");
+            return EXIT_FAILURE;
+        }
+        char* ponto = strrchr(nome_arquivo_asm, '.');
+        if (ponto != NULL) *ponto = '\0';
+        strncat(nome_arquivo_asm, ".s", sizeof(nome_arquivo_asm) - strlen(nome_arquivo_asm) - 1);
     }
-    strcat(nome_arquivo_asm, ".s"); //adiciona a extensão .s
 
     if (gerar_assembly(ir_head, pilha_simbolos, nome_arquivo_asm) != 0) {
         liberar_arvore(arvore);
         liberar_ir(ir_head);
         destruir_pilha_tabelas(pilha_simbolos);
         liberar_token_list(&tokens);
-        return -1; //encerra se houver erro na geração de assembly
+        return EXIT_FAILURE; //encerra se houver erro na geração de assembly
     }
     printf("Fase 5 (Geracao de Assembly) concluida: '%s' gerado.\n", nome_arquivo_asm);
 
@@ -237,38 +289,32 @@ void salvar_tokens_em_arquivo(TokenList* tokens, bool verbose) {
 void processar_ast_recursivamente(ASTNode *no, int indent_level, FILE *arquivo) {
     if (no == NULL) return;
     
-    char indent_str[100] = "";
-    for (int i = 0; i < indent_level; ++i) {
-        strcat(indent_str, "  ");
-    }
-
-    #define PRINT(format, ...) do { if (arquivo) fprintf(arquivo, format, ##__VA_ARGS__); else printf(format, ##__VA_ARGS__); } while(0)
-    
-    PRINT("%s", indent_str);
+    FILE* destino = arquivo != NULL ? arquivo : stdout;
+    for (int i = 0; i < indent_level; ++i) fputs("  ", destino);
     switch (no->node_type) {
-        case NODE_PROGRAM: PRINT("NO_PROGRAMA\n"); break;
-        case NODE_FUNCTION_DEF: PRINT("NO_DEFINICAO_FUNCAO\n"); break;
-        case NODE_VAR_DECL: PRINT("NO_DECLARACAO_VARIAVEL\n"); break;
-        case NODE_ASSIGN: PRINT("NO_ATRIBUICAO\n"); break;
-        case NODE_IF: PRINT("NO_IF\n"); break;
-        case NODE_FOR: PRINT("NO_FOR\n"); break;
-        case NODE_RETURN: PRINT("NO_RETORNO\n"); break;
-        case NODE_PRINT: PRINT("NO_PRINT\n"); break;
-        case NODE_BLOCK: PRINT("NO_BLOCO\n"); break;
-        case NODE_PARAM_LIST: PRINT("NO_LISTA_PARAMETROS\n"); break;
-        case NODE_ARG_LIST: PRINT("NO_LISTA_ARGUMENTOS\n"); break;
-        case NODE_ARRAY_ACCESS: PRINT("NO_ACESSO_ARRAY\n"); break;
-        case NODE_CALL: PRINT("NO_CHAMADA_FUNCAO\n"); break;
-        case NODE_TYPE: PRINT("NO_TIPO (%s)\n", no->data.op_type == INT ? "INT" : "CHAR"); break;
-        case NODE_ID: PRINT("NO_ID (Nome: %s)\n", no->data.string_value); break;
-        case NODE_INTEGER_CONST: PRINT("NO_CONST_INT (Valor: %ld)\n", no->data.int_value); break;
-        case NODE_CHAR_CONST: PRINT("NO_CONST_CHAR (Valor: '%c')\n", no->data.char_value); break;
-        case NODE_STRING_CONST: PRINT("NO_CONST_STRING (Valor: \"%s\")\n", no->data.string_value); break; 
-        case NODE_BINARY_OP: PRINT("NO_OP_BINARIA (%s)\n", token_name(no->data.op_type)); break;
-        case NODE_UNDEFINED: PRINT("NO_INSTRUCAO_VAZIA\n"); break;
-        default: PRINT("NO_DESCONHECIDO (tipo: %d)\n", no->node_type); break;
+        case NODE_PROGRAM: fprintf(destino, "NO_PROGRAMA\n"); break;
+        case NODE_FUNCTION_DEF: fprintf(destino, "NO_DEFINICAO_FUNCAO\n"); break;
+        case NODE_VAR_DECL: fprintf(destino, "NO_DECLARACAO_VARIAVEL\n"); break;
+        case NODE_ASSIGN: fprintf(destino, "NO_ATRIBUICAO\n"); break;
+        case NODE_IF: fprintf(destino, "NO_IF\n"); break;
+        case NODE_FOR: fprintf(destino, "NO_FOR\n"); break;
+        case NODE_RETURN: fprintf(destino, "NO_RETORNO\n"); break;
+        case NODE_PRINT: fprintf(destino, "NO_PRINT\n"); break;
+        case NODE_BLOCK: fprintf(destino, "NO_BLOCO\n"); break;
+        case NODE_PARAM_LIST: fprintf(destino, "NO_LISTA_PARAMETROS\n"); break;
+        case NODE_ARG_LIST: fprintf(destino, "NO_LISTA_ARGUMENTOS\n"); break;
+        case NODE_ARRAY_ACCESS: fprintf(destino, "NO_ACESSO_ARRAY\n"); break;
+        case NODE_CALL: fprintf(destino, "NO_CHAMADA_FUNCAO\n"); break;
+        case NODE_TYPE: fprintf(destino, "NO_TIPO (%s)\n", no->data.op_type == INT ? "INT" : "CHAR"); break;
+        case NODE_ID: fprintf(destino, "NO_ID (Nome: %s)\n", no->data.string_value); break;
+        case NODE_INTEGER_CONST: fprintf(destino, "NO_CONST_INT (Valor: %ld)\n", no->data.int_value); break;
+        case NODE_CHAR_CONST: fprintf(destino, "NO_CONST_CHAR (Valor: '%c')\n", no->data.char_value); break;
+        case NODE_STRING_CONST: fprintf(destino, "NO_CONST_STRING (Valor: \"%s\")\n", no->data.string_value); break;
+        case NODE_BINARY_OP: fprintf(destino, "NO_OP_BINARIA (%s)\n", token_name(no->data.op_type)); break;
+        case NODE_UNARY_OP: fprintf(destino, "NO_OP_UNARIA (%s)\n", token_name(no->data.op_type)); break;
+        case NODE_UNDEFINED: fprintf(destino, "NO_INSTRUCAO_VAZIA\n"); break;
+        default: fprintf(destino, "NO_DESCONHECIDO (tipo: %d)\n", no->node_type); break;
     }
-    #undef PRINT
 
     ASTNode* filho = no->filho;
     while (filho != NULL) {
@@ -298,222 +344,156 @@ void salvar_ast(ASTNode* arvore, bool verbose) {
     }
 }
 
-/** @brief imprime a lista de Código Intermediário (IR) de forma legível. */
-void imprimir_ir(IR_Instruction* ir_head) {
-    printf("--- CODIGO INTERMEDIARIO (IR) ---\n");
-    IR_Instruction* instr = ir_head;
-    if (!instr) {
-        printf("(nenhuma instrucao gerada)\n");
+/** @brief imprime um operando da ir no fluxo informado. */
+static void imprimir_operando_ir(FILE* saida, IROperand* operando) {
+    if (operando == NULL) {
+        fprintf(saida, "_");
+        return;
     }
-    
-    //função interna auxiliar para imprimir um operando
-    void print_op(IROperand* op) {
-        if (op == NULL) { printf("_"); return; }
-        switch(op->type) {
-            case OPERAND_SYMBOL:
-                if (op->data.symbol) printf("%s", op->data.symbol->nome);
-                else printf("(simbolo nulo)");
-                break;
-            case OPERAND_TEMP: printf("t%d", op->data.temp_id); break;
-            case OPERAND_CONST: printf("%d", op->data.const_val); break;
-            case OPERAND_LABEL: printf("%s", op->data.label_name); break;
-            case OPERAND_STRING_LBL: printf("%s", op->data.label_name); break;
-            default: printf("OPERANDO_INVALIDO"); break;
-        }
+    switch (operando->type) {
+        case OPERAND_SYMBOL:
+            if (operando->data.symbol != NULL) fprintf(saida, "%s", operando->data.symbol->nome);
+            else fprintf(saida, "(simbolo nulo)");
+            break;
+        case OPERAND_TEMP: fprintf(saida, "t%d", operando->data.temp_id); break;
+        case OPERAND_CONST: fprintf(saida, "%d", operando->data.const_val); break;
+        case OPERAND_LABEL:
+        case OPERAND_STRING_LBL: fprintf(saida, "%s", operando->data.label_name); break;
+        default: fprintf(saida, "OPERANDO_INVALIDO"); break;
     }
-
-    while(instr) {
-        if (instr->opcode != IR_LABEL) {
-            printf("    ");
-        }
-        switch(instr->opcode) {
-            case IR_LABEL:
-                print_op(instr->result);
-                printf(":");
-                break;
-            case IR_ASSIGN:
-                print_op(instr->result); printf(" := "); print_op(instr->arg1);
-                break;
-            case IR_LOAD:
-                print_op(instr->result); printf(" := LOAD "); print_op(instr->arg1);
-                printf("["); print_op(instr->arg2); printf("]");
-                break;
-            case IR_STORE:
-                printf("STORE "); print_op(instr->result); printf("["); print_op(instr->arg2); printf("]");
-                printf(" := "); print_op(instr->arg1);
-                break;
-            case IR_ADD: case IR_SUB: case IR_MUL: case IR_DIV:
-            case IR_LT: case IR_EQ:
-                print_op(instr->result); printf(" := ");
-                print_op(instr->arg1);
-                if (instr->opcode == IR_ADD) printf(" + ");
-                else if (instr->opcode == IR_SUB) printf(" - ");
-                else if (instr->opcode == IR_MUL) printf(" * ");
-                else if (instr->opcode == IR_DIV) printf(" / ");
-                else if (instr->opcode == IR_LT) printf(" < ");
-                else if (instr->opcode == IR_EQ) printf(" == ");
-                print_op(instr->arg2);
-                break;
-            case IR_RETURN:
-                printf("return "); print_op(instr->arg1);
-                break;
-            case IR_GOTO:
-                printf("goto "); print_op(instr->result);
-                break;
-            case IR_IF_FALSE:
-                printf("if_false "); print_op(instr->arg1); printf(" goto "); print_op(instr->result);
-                break;
-            
-            case IR_PARAM:
-                printf("param "); print_op(instr->arg1);
-                break;
-            case IR_CALL:
-                if (instr->result) {
-                    print_op(instr->result); printf(" := ");
-                }
-                printf("call "); print_op(instr->arg1);
-                if (instr->arg2) {
-                    printf(", "); print_op(instr->arg2);
-                }
-                break;
-
-            case IR_PRINT_INT:
-                printf("print_int ");
-                print_op(instr->arg1); //imprime o número ou o símbolo
-                break;
-            
-            case IR_PRINT_CHAR:
-                printf("print_char ");
-                print_op(instr->arg1);
-                break;
-
-            case IR_PRINT_STRING:
-                printf("print_string ");
-                print_op(instr->arg1);
-                break;
-            
-            
-            
-            default:
-                printf("(opcode %d nao implementado para impressao)", instr->opcode);
-                break;
-        }
-        printf("\n");
-        instr = instr->next;
-    }
-    printf("---------------------------------\n");
 }
 
+/** @brief retorna a representação textual de um operador binário. */
+static const char* simbolo_operador_ir(IROpcode opcode) {
+    switch (opcode) {
+        case IR_ADD: return "+";
+        case IR_SUB: return "-";
+        case IR_MUL: return "*";
+        case IR_DIV: return "/";
+        case IR_MOD: return "%";
+        case IR_EQ: return "==";
+        case IR_NEQ: return "!=";
+        case IR_LT: return "<";
+        case IR_LEQ: return "<=";
+        case IR_GT: return ">";
+        case IR_GEQ: return ">=";
+        case IR_AND: return "&&";
+        case IR_OR: return "||";
+        default: return "?";
+    }
+}
 
-/** @brief salva a lista de Código Intermediário (IR) no arquivo 'ir.txt'. */
+/** @brief escreve uma lista de ir no fluxo solicitado. */
+static void imprimir_ir_no_fluxo(FILE* saida, IR_Instruction* ir_head) {
+    fprintf(saida, "--- CODIGO INTERMEDIARIO (IR) ---\n");
+    if (ir_head == NULL) fprintf(saida, "(nenhuma instrucao gerada)\n");
+
+    for (IR_Instruction* instr = ir_head; instr != NULL; instr = instr->next) {
+        if (instr->opcode != IR_LABEL) fputs("    ", saida);
+        switch (instr->opcode) {
+            case IR_LABEL:
+                imprimir_operando_ir(saida, instr->result);
+                fputc(':', saida);
+                break;
+            case IR_ASSIGN:
+                imprimir_operando_ir(saida, instr->result);
+                fputs(" := ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            case IR_ADD: case IR_SUB: case IR_MUL: case IR_DIV: case IR_MOD:
+            case IR_EQ: case IR_NEQ: case IR_LT: case IR_LEQ: case IR_GT:
+            case IR_GEQ: case IR_AND: case IR_OR:
+                imprimir_operando_ir(saida, instr->result);
+                fputs(" := ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                fprintf(saida, " %s ", simbolo_operador_ir(instr->opcode));
+                imprimir_operando_ir(saida, instr->arg2);
+                break;
+            case IR_NEG:
+            case IR_NOT:
+                imprimir_operando_ir(saida, instr->result);
+                fprintf(saida, " := %s", instr->opcode == IR_NEG ? "-" : "!");
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            case IR_LOAD:
+            case IR_LOAD_BYTE:
+                imprimir_operando_ir(saida, instr->result);
+                fprintf(saida, " := %s ", instr->opcode == IR_LOAD ? "LOAD" : "LOAD_BYTE");
+                imprimir_operando_ir(saida, instr->arg1);
+                fputc('[', saida);
+                imprimir_operando_ir(saida, instr->arg2);
+                fputc(']', saida);
+                break;
+            case IR_STORE:
+            case IR_STORE_BYTE:
+                fprintf(saida, "%s ", instr->opcode == IR_STORE ? "STORE" : "STORE_BYTE");
+                imprimir_operando_ir(saida, instr->result);
+                fputc('[', saida);
+                imprimir_operando_ir(saida, instr->arg2);
+                fputs("] := ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            case IR_STRCPY:
+                fputs("strcpy ", saida);
+                imprimir_operando_ir(saida, instr->result);
+                fputs(", ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            case IR_RETURN:
+                fputs("return ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            case IR_GOTO:
+                fputs("goto ", saida);
+                imprimir_operando_ir(saida, instr->result);
+                break;
+            case IR_IF_FALSE:
+                fputs("if_false ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                fputs(" goto ", saida);
+                imprimir_operando_ir(saida, instr->result);
+                break;
+            case IR_PARAM:
+                fputs("param ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            case IR_CALL:
+                imprimir_operando_ir(saida, instr->result);
+                fputs(" := call ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                fputs(", ", saida);
+                imprimir_operando_ir(saida, instr->arg2);
+                break;
+            case IR_PRINT_INT:
+            case IR_PRINT_CHAR:
+            case IR_PRINT_STRING:
+                if (instr->opcode == IR_PRINT_INT) fputs("print_int ", saida);
+                if (instr->opcode == IR_PRINT_CHAR) fputs("print_char ", saida);
+                if (instr->opcode == IR_PRINT_STRING) fputs("print_string ", saida);
+                imprimir_operando_ir(saida, instr->arg1);
+                break;
+            default:
+                fprintf(saida, "(opcode invalido %d)", instr->opcode);
+                break;
+        }
+        fputc('\n', saida);
+    }
+    fprintf(saida, "---------------------------------\n");
+}
+
+/** @brief imprime a lista de código intermediário no terminal. */
+void imprimir_ir(IR_Instruction* ir_head) {
+    imprimir_ir_no_fluxo(stdout, ir_head);
+}
+
+/** @brief salva a lista de código intermediário no arquivo `ir.txt`. */
 void salvar_ir_em_arquivo(IR_Instruction* ir_head, bool verbose) {
-    FILE *saida = fopen("ir.txt", "w");
+    FILE* saida = fopen("ir.txt", "w");
     if (saida == NULL) {
         fprintf(stderr, "Erro: Nao foi possivel criar o arquivo ir.txt\n");
         return;
     }
-
-    fprintf(saida, "--- CODIGO INTERMEDIARIO (IR) ---\n");
-    IR_Instruction* instr = ir_head;
-    if (!instr) {
-        fprintf(saida, "(nenhuma instrucao gerada)\n");
-    }
-    
-    //função interna auxiliar para imprimir um operando no arquivo
-    void print_op_to_file(IROperand* op) {
-        if (op == NULL) { fprintf(saida, "_"); return; }
-        switch(op->type) {
-            case OPERAND_SYMBOL:
-                if (op->data.symbol) fprintf(saida, "%s", op->data.symbol->nome);
-                else fprintf(saida, "(simbolo nulo)");
-                break;
-            case OPERAND_TEMP: fprintf(saida, "t%d", op->data.temp_id); break;
-            case OPERAND_CONST: fprintf(saida, "%d", op->data.const_val); break;
-            case OPERAND_LABEL: fprintf(saida, "%s", op->data.label_name); break;
-            case OPERAND_STRING_LBL: fprintf(saida, "%s", op->data.label_name); break;
-            default: fprintf(saida, "OPERANDO_INVALIDO"); break;
-        }
-    }
-
-    while(instr) {
-        if (instr->opcode != IR_LABEL) {
-            fprintf(saida, "    ");
-        }
-        switch(instr->opcode) {
-            case IR_LABEL:
-                print_op_to_file(instr->result);
-                fprintf(saida, ":");
-                break;
-            case IR_ASSIGN:
-                print_op_to_file(instr->result); fprintf(saida, " := "); print_op_to_file(instr->arg1);
-                break;
-            case IR_LOAD:
-                print_op_to_file(instr->result); fprintf(saida, " := LOAD "); print_op_to_file(instr->arg1);
-                fprintf(saida, "["); print_op_to_file(instr->arg2); fprintf(saida, "]");
-                break;
-            case IR_STORE:
-                fprintf(saida, "STORE "); print_op_to_file(instr->result); fprintf(saida, "["); print_op_to_file(instr->arg2); fprintf(saida, "]");
-                fprintf(saida, " := "); print_op_to_file(instr->arg1);
-                break;
-            case IR_ADD: case IR_SUB: case IR_MUL: case IR_DIV:
-            case IR_LT: case IR_EQ:
-                print_op_to_file(instr->result); fprintf(saida, " := ");
-                print_op_to_file(instr->arg1);
-                if (instr->opcode == IR_ADD) fprintf(saida, " + ");
-                else if (instr->opcode == IR_SUB) fprintf(saida, " - ");
-                else if (instr->opcode == IR_MUL) fprintf(saida, " * ");
-                else if (instr->opcode == IR_DIV) fprintf(saida, " / ");
-                else if (instr->opcode == IR_LT) fprintf(saida, " < ");
-                else if (instr->opcode == IR_EQ) fprintf(saida, " == ");
-                print_op_to_file(instr->arg2);
-                break;
-            case IR_RETURN:
-                fprintf(saida, "return "); print_op_to_file(instr->arg1);
-                break;
-            case IR_GOTO:
-                fprintf(saida, "goto "); print_op_to_file(instr->result);
-                break;
-            case IR_IF_FALSE:
-                fprintf(saida, "if_false "); print_op_to_file(instr->arg1); fprintf(saida, " goto "); print_op_to_file(instr->result);
-                break;
-            case IR_PARAM:
-                fprintf(saida, "param "); print_op_to_file(instr->arg1);
-                break;
-            case IR_CALL:
-                if (instr->result) {
-                    print_op_to_file(instr->result); fprintf(saida, " := ");
-                }
-                fprintf(saida, "call "); print_op_to_file(instr->arg1);
-                if (instr->arg2) {
-                    fprintf(saida, ", "); print_op_to_file(instr->arg2);
-                }
-                break;
-            case IR_PRINT_INT:
-                fprintf(saida, "print_int ");
-                print_op_to_file(instr->arg1);
-                break;
-            
-            case IR_PRINT_CHAR:
-                fprintf(saida, "print_char ");
-                print_op_to_file(instr->arg1);
-                break;
-
-            case IR_PRINT_STRING:
-                fprintf(saida, "print_string ");
-                print_op_to_file(instr->arg1);
-                break;
-            
-            default:
-                fprintf(saida, "(opcode %d nao implementado para impressao)", instr->opcode);
-                break;
-        }
-        fprintf(saida, "\n");
-        instr = instr->next;
-    }
-    fprintf(saida, "---------------------------------\n");
-    
+    imprimir_ir_no_fluxo(saida, ir_head);
     fclose(saida);
-    if (verbose) {
-        printf("Arquivo 'ir.txt' gerado com sucesso.\n");
-    }
+    if (verbose) printf("Arquivo 'ir.txt' gerado com sucesso.\n");
 }
