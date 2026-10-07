@@ -50,7 +50,7 @@ você pode instalar ou remover utilizando `make install` e `make uninstall`, res
 
 2. Executar as Fases de Análise
 
-O Makefile usa, por padrão, o arquivo teste.cmm como entrada.  
+O Makefile usa, por padrão, o arquivo `exemplos/base.mcc` como entrada.
 Você pode executar cada fase separadamente com os comandos abaixo:
 
 ```bash
@@ -66,7 +66,7 @@ $ make semantic
 # Geração de Código Intermediário: imprime a IR e salva em ir.txt
 $ make gen-ir
 
-# Geração de Assembly: imprime o código Assembly e salva em teste.s
+# Geração de Assembly: imprime o código Assembly e salva em exemplos/base.s
 $ make gen-asm
 ```
 
@@ -79,18 +79,18 @@ $ make run
 ```
 
 Esse comando:
-1. Gera o Assembly (teste.s) com make gen-asm.
-2. Usa o gcc para montar e linkar o arquivo, criando o executável teste.
-3. Executa o programa final (./teste).
+1. Gera o Assembly com `make gen-asm`.
+2. Usa o GCC para montar e ligar o arquivo, criando o executável.
+3. Executa o programa final.
 
 4. Usando um Arquivo de Teste Diferente
 
 Você pode especificar outro arquivo de entrada diretamente na linha de comando:
 
 ```bash
-$ make scan INPUT=meu_teste.cmm
-$ make gen-asm INPUT=meu_teste.cmm
-$ make run INPUT=meu_teste.cmm
+$ make scan INPUT=meu_teste.mcc
+$ make gen-asm INPUT=meu_teste.mcc
+$ make run INPUT=meu_teste.mcc
 ```
 
 Os arquivos de saída (como .s e .txt) serão gerados com o nome correspondente.
@@ -102,6 +102,17 @@ Para remover todos os arquivos gerados (objetos, executáveis e temporários):
 ```bash
 $ make clean
 ```
+
+6. Testes automatizados
+
+```bash
+$ make test
+$ make sanitize
+```
+
+`make test` compila, monta e executa os exemplos oficiais e os casos de
+regressão. `make sanitize` recompila o compilador com AddressSanitizer e
+UndefinedBehaviorSanitizer e valida todas as entradas positivas.
 
 ---
 
@@ -123,17 +134,17 @@ src/semantic/semantic.c \
 src/ir/ir.c \
 src/intercode/intercode.c \
 src/assembly/assembly.c \
--o compilador
+-o mcc
 ```
 
-2. Executar as Fases (Exemplo com teste.cmm)
+2. Executar as Fases (exemplo com `exemplos/base.mcc`)
 
 ```bash
-$ ./compilador --scan teste.cmm       # Análise Léxica
-$ ./compilador --parse teste.cmm      # Análise Sintática
-$ ./compilador --semantic teste.cmm   # Análise Semântica
-$ ./compilador --gen-ir teste.cmm     # Geração de IR
-$ ./compilador --gen-asm teste.cmm    # Geração de Assembly
+$ ./mcc --scan exemplos/base.mcc
+$ ./mcc --parse exemplos/base.mcc
+$ ./mcc --semantic exemplos/base.mcc
+$ ./mcc --gen-ir exemplos/base.mcc
+$ ./mcc --gen-asm exemplos/base.mcc -o base.s
 ```
 
 3. Executar uma Compilação Completa (Manual)
@@ -141,17 +152,20 @@ $ ./compilador --gen-asm teste.cmm    # Geração de Assembly
 ### Gerar o Assembly
 
 ```bash
-$ ./compilador teste.cmm
+$ ./mcc exemplos/base.mcc -o base.s
 ```
 
 ### Montar e linkar com o GCC
 
 ```bash
-$ gcc teste.s -o teste
+$ gcc -Wl,-z,noexecstack base.s -o base
 ```
 
 ### Executar o programa final
 
 ```bash
-$ ./teste
+$ ./base
 ```
+
+Use `./mcc --help` para consultar a sintaxe aceita. A opção `-o` é válida na
+geração de Assembly e no modo completo.

@@ -2,6 +2,58 @@
 #include <string.h>
 #include "ir.h"
 
+/** @brief cria uma cópia portável de uma string. */
+static char* duplicar_string(const char* texto) {
+    size_t tamanho = strlen(texto) + 1;
+    char* copia = malloc(tamanho);
+    if (copia != NULL) memcpy(copia, texto, tamanho);
+    return copia;
+}
+
+/** @brief cria uma cópia profunda e independente de um operando. */
+IROperand* copiar_operando(const IROperand* operando) {
+    if (operando == NULL) return NULL;
+
+    IROperand* copia = calloc(1, sizeof(*copia));
+    if (copia == NULL) return NULL;
+
+    copia->type = operando->type;
+    copia->data = operando->data;
+    copia->stack_offset = operando->stack_offset;
+
+    if ((operando->type == OPERAND_LABEL || operando->type == OPERAND_STRING_LBL) &&
+        operando->data.label_name != NULL) {
+        copia->data.label_name = duplicar_string(operando->data.label_name);
+        if (copia->data.label_name == NULL) {
+            free(copia);
+            return NULL;
+        }
+        copia->owns_label = 1;
+    }
+
+    if (operando->string_content != NULL) {
+        copia->string_content = duplicar_string(operando->string_content);
+        if (copia->string_content == NULL) {
+            liberar_operando(copia);
+            return NULL;
+        }
+    }
+
+    return copia;
+}
+
+/** @brief libera um operando e todos os dados pertencentes a ele. */
+void liberar_operando(IROperand* operando) {
+    if (operando == NULL) return;
+
+    if ((operando->type == OPERAND_LABEL || operando->type == OPERAND_STRING_LBL) &&
+        operando->owns_label && operando->data.label_name != NULL) {
+        free(operando->data.label_name);
+    }
+    free(operando->string_content);
+    free(operando);
+}
+
 /**
  * @file ir.c
  * @brief implementação de funções de utilidade para a representação intermediária.
@@ -26,49 +78,9 @@ void liberar_ir(IR_Instruction* ir_head) {
     while (atual != NULL) {
         proximo = atual->next;
         
-        //libera result
-        if (atual->result) {
-            //só libera label_name se for LABEL/STRING_LBL e for o dono
-            if ((atual->result->type == OPERAND_LABEL || atual->result->type == OPERAND_STRING_LBL)
-                && atual->result->owns_label
-                && atual->result->data.label_name) {
-                free(atual->result->data.label_name);
-            }
-            //sempre libera a estrutura do operando
-            if (atual->result->type == OPERAND_STRING_LBL && atual->result->string_content) {
-            free(atual->result->string_content);
-            }
-            free(atual->result);
-        }
-        
-        //libera arg1
-        if (atual->arg1) {
-            //só libera label_name se for LABEL/STRING_LBL e for o dono
-            if ((atual->arg1->type == OPERAND_LABEL || atual->arg1->type == OPERAND_STRING_LBL)
-                && atual->arg1->owns_label
-                && atual->arg1->data.label_name) {
-                free(atual->arg1->data.label_name);
-            }
-            if (atual->arg1->type == OPERAND_STRING_LBL && atual->arg1->string_content) {
-                free(atual->arg1->string_content);
-            }
-            free(atual->arg1);
-        }
-        
-        //libera arg2
-        if (atual->arg2) {
-            //só libera label_name se for LABEL/STRING_LBL e for o dono
-            if ((atual->arg2->type == OPERAND_LABEL || atual->arg2->type == OPERAND_STRING_LBL)
-                && atual->arg2->owns_label
-                && atual->arg2->data.label_name) {
-                free(atual->arg2->data.label_name);
-            }
-            //libera string_content se ele existir
-            if (atual->arg2->type == OPERAND_STRING_LBL && atual->arg2->string_content) {
-                free(atual->arg2->string_content);
-            }
-            free(atual->arg2);
-        }
+        liberar_operando(atual->result);
+        liberar_operando(atual->arg1);
+        liberar_operando(atual->arg2);
         
         //libera a instrução
         free(atual);

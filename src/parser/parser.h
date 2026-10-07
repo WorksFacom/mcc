@@ -105,6 +105,8 @@ ASTNode* expression(Parser *parser);
 ASTNode* arithmetic_expression(Parser* parser);
 /** @brief processa um termo (multiplicação/divisão). */
 ASTNode* term(Parser* parser);
+/** @brief processa operadores unários de negação aritmética e lógica. */
+ASTNode* unary_expression(Parser* parser);
 /** @brief processa um fator (número, ID, parênteses). */
 ASTNode* factor(Parser* parser);
 /** @brief processa uma instrução de atribuição. */

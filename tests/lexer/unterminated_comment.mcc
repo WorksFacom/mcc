@@ -1,0 +1,4 @@
+int main() {
+    /* comentario sem fechamento
+    return 0;
+}

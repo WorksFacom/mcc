@@ -1,0 +1,12 @@
+int primeira(int valor) {
+    return segunda(valor) + 1;
+}
+
+int segunda(int valor) {
+    return valor * 2;
+}
+
+int main() {
+    print(primeira(5));
+    return 0;
+}

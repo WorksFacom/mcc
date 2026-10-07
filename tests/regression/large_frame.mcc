@@ -1,0 +1,6 @@
+int main() {
+    int valores[100];
+    valores[99] = 42;
+    print(valores[99]);
+    return 0;
+}

@@ -78,6 +78,7 @@ typedef struct {
         char* label_name;
     } data;
     char* string_content;
+    int stack_offset;      ///< offset atribuído ao temporário no frame atual.
 } IROperand;
 
 //estrutura para uma única instrução da nossa ir
@@ -94,5 +95,11 @@ typedef struct IR_Instruction {
  * @param ir_head ponteiro para a primeira instrução da lista.
  */
 void liberar_ir(IR_Instruction* ir_head);
+
+/** @brief cria uma cópia profunda e independente de um operando. */
+IROperand* copiar_operando(const IROperand* operando);
+
+/** @brief libera um operando e todos os dados pertencentes a ele. */
+void liberar_operando(IROperand* operando);
 
 #endif //IR_H
