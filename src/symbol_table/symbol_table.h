@@ -14,9 +14,6 @@
  * pilha de tabelas para gerenciar os escopos.
  */
 
-#define MAX_SIMBOLOS 100
-#define MAX_PARAMETROS 10
-
 /** @brief armazena informações sobre um único símbolo (variável, função, etc.). */
 typedef struct {
     char nome[100];                         ///< nome do identificador.
@@ -28,6 +25,8 @@ typedef struct {
     int array_size;                         ///< armazena o tamanho se for um array.
     int memory_offset;                      ///< o deslocamento (offset) do símbolo na pilha de execução.
     int is_parameter;                       ///< flag que indica se o símbolo é um parâmetro.
+    int local_size;                         ///< bytes ocupados pelas variáveis locais da função.
+    int frame_size;                         ///< tamanho final e alinhado do frame da função.
 } Simbolo;
 
 /** @brief representa uma tabela de símbolos para um único escopo. */
@@ -40,6 +39,8 @@ typedef struct {
 typedef struct {
     TabelaSimbolos *tabelas[MAX_SIMBOLOS]; ///< array de ponteiros para as tabelas de cada escopo.
     int topo;                             ///< indice para o topo da pilha.
+    TabelaSimbolos *tabelas_alocadas[MAX_SIMBOLOS]; ///< tabelas pertencentes à pilha.
+    int quantidade_tabelas;                         ///< número total de tabelas alocadas.
 } PilhaTabelasSimbolos;
 
 

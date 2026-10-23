@@ -1,0 +1,8 @@
+char letra() {
+    return 'Z';
+}
+
+int main() {
+    print(letra());
+    return 0;
+}

@@ -1,0 +1,16 @@
+=== INICIO DO TESTE ===
+Compilador:
+Micro C Compiler
+Teste de Bytes Manual:
+OK
+Teste Aritmetico (10 * 5 + 10 / 2):
+55
+Teste Logico:
+Sucesso: Logica AND/OR funciona!
+Teste de Loop e Recursao (Fatoriais):
+1
+2
+6
+24
+120
+Teste Finalizado com Sucesso!

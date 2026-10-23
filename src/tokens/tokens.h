@@ -1,6 +1,7 @@
 #ifndef TOKENS_H
 #define TOKENS_H
 
+#include "../config/config.h"
 
 /** @file tokens.h
  *  @brief Definições de tipos de tokens e estrutura de token para a linguagem Simple C.
@@ -62,7 +63,7 @@ typedef enum {
 typedef struct {
     /** @brief Tipo do token, conforme definido em TokenType. */
     TokenType tipo;
-    char lexema[100];
+    char lexema[MAX_TOKEN_LEN];
     int linha;
 
 } Token;

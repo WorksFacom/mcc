@@ -72,6 +72,9 @@ typedef struct ASTNode {
      */
     void* symbol;
 
+    /** @brief tipo calculado pela análise semântica para nós de expressão. */
+    TokenType inferred_type;
+
     /** @brief união para armazenar dados específicos do nó de forma eficiente. */
     union {
         long int_value;      ///< usado por nós do tipo NODE_INTEGER_CONST.

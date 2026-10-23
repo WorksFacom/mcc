@@ -32,6 +32,8 @@ ASTNode* criar_no(NodeType type, int linha) {
     no->linha = linha;
     no->filho = NULL;
     no->proximo_irmao = NULL;
+    no->symbol = NULL;
+    no->inferred_type = UNDEF;
 
     //limpa a união de dados para evitar valores de lixo
     memset(&no->data, 0, sizeof(no->data));

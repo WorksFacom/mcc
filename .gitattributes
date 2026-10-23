@@ -1,0 +1,5 @@
+Makefile -text whitespace=cr-at-eol
+.gitignore -text whitespace=cr-at-eol
+*.c -text whitespace=cr-at-eol
+*.h -text whitespace=cr-at-eol
+tests/expected/*.txt whitespace=-blank-at-eof

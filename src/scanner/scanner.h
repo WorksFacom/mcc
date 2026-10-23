@@ -32,6 +32,9 @@ extern int linha_atual;
  */
 int inicializar_scanner(const char* nome_arquivo);
 
+/** @brief fecha o arquivo-fonte e reinicializa o estado do scanner. */
+void finalizar_scanner(void);
+
 /**
  * @brief gera o próximo token do arquivo fonte.
  *

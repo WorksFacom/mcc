@@ -1,507 +1,357 @@
 /**
  * @file assembly.c
- * @brief implementação do gerador de código assembly x86-64.
- *
- * este módulo traduz a representação intermediária (ir) para o 
- * código assembly final da arquitetura x86-64, usando a sintaxe at&t.
+ * @brief tradução da ir para assembly x86-64 em sintaxe AT&T.
  */
+#include <ctype.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
 #include "assembly.h"
 
-//ponteiro para o arquivo de saída onde o assembly será escrito
-static FILE* outfile;
-//buffer estático global para construir strings de operandos formatados
+static FILE* outfile = NULL;
 static char asm_buffer[100];
-//contador global para o número de parâmetros sendo empilhados para uma chamada
-static int param_count = 0;
-static IROperand* param_buffer[10]; 
-static int param_buffer_count = 0;   
+static IROperand* param_buffer[MAX_PARAMETROS];
+static int param_buffer_count = 0;
 
 //================================================================================
-// FUNÇÕES AUXILIARES DE GERAÇÃO
+// FUNÇÕES AUXILIARES DE EMISSÃO
 //================================================================================
 
-/**
- * @brief escreve uma linha de assembly formatada no arquivo de saída, sem indentação.
- * @details usado para labels e diretivas (ex: .text, main:).
- * @param format a string de formato (como em printf).
- * @param ... os argumentos variáveis para a string de formato.
- */
-static void asm_print(const char* format, ...) {
+/** @brief escreve uma diretiva ou rótulo sem indentação. */
+static void asm_print(const char* formato, ...) {
     va_list args;
-    va_start(args, format);
-    vfprintf(outfile, format, args);
+    va_start(args, formato);
+    vfprintf(outfile, formato, args);
     va_end(args);
-    fprintf(outfile, "\n");
+    fputc('\n', outfile);
 }
 
-/**
- * @brief escreve uma linha de instrução assembly formatada, com indentação.
- * @details usado para instruções de máquina (ex: movl, addl, jmp).
- * @param format a string de formato (como em printf).
- * @param ... os argumentos variáveis para a string de formato.
- */
-static void asm_instr(const char* format, ...) {
-    fprintf(outfile, "    "); //indenta com 4 espaços
+/** @brief escreve uma instrução com a indentação padrão. */
+static void asm_instr(const char* formato, ...) {
+    fputs("    ", outfile);
     va_list args;
-    va_start(args, format);
-    vfprintf(outfile, format, args);
+    va_start(args, formato);
+    vfprintf(outfile, formato, args);
     va_end(args);
-    fprintf(outfile, "\n");
+    fputc('\n', outfile);
 }
 
-/**
- * @brief traduz um operando da ir para sua representação em assembly at&t.
- * @detalhes esta é uma função crucial que mapeia os conceitos da ir
- * (constante, símbolo, temporário) para a sintaxe específica do assembly.
- * @param op o operando da ir (ex: um OPERAND_CONST com valor 10).
- * @return uma string estática formatada para o assembly (ex: "$10", "-4(%rbp)").
- */
-static char* get_operand_asm(IROperand* op) {
-    if (op == NULL) {
-        strcpy(asm_buffer, "NULL_OPERAND");
-        return asm_buffer;
-    }
+/** @brief converte um operando da ir para a sintaxe do montador. */
+static const char* get_operand_asm(const IROperand* op) {
+    if (op == NULL) return "NULL_OPERAND";
 
     switch (op->type) {
         case OPERAND_CONST:
-            //constantes (valores imediatos) são prefixadas com "$"
-            sprintf(asm_buffer, "$%d", op->data.const_val);
+            snprintf(asm_buffer, sizeof(asm_buffer), "$%d", op->data.const_val);
             break;
-
         case OPERAND_SYMBOL:
-            //símbolos (variáveis/parâmetros) são acessados por seu offset
-            //calculado pelo semantic.c (ex: -4(%rbp) ou +16(%rbp))
-            if (op->data.symbol == NULL) {
-                sprintf(asm_buffer, "NULL_SYMBOL_ERROR");
-            } else {
-                sprintf(asm_buffer, "%d(%%rbp)", op->data.symbol->memory_offset);
-            }
+            if (op->data.symbol == NULL) return "NULL_SYMBOL_ERROR";
+            snprintf(asm_buffer, sizeof(asm_buffer), "%d(%%rbp)", op->data.symbol->memory_offset);
             break;
-            
-        case OPERAND_TEMP: {
-            //temporários (t0, t1, ...) também vivem na pilha.
-            //vamos calcular um offset para eles, reservando uma área
-            //separada das variáveis locais (ex: a partir de -128)
-            //cada temp tem 4 bytes (tamanho de um int)
-            int temp_offset = -128 - (op->data.temp_id * 4);
-            sprintf(asm_buffer, "%d(%%rbp)", temp_offset);
+        case OPERAND_TEMP:
+            snprintf(asm_buffer, sizeof(asm_buffer), "%d(%%rbp)", op->stack_offset);
             break;
-        }
-
         case OPERAND_LABEL:
         case OPERAND_STRING_LBL:
-            //labels são usados diretamente como endereços de código ou dados
-            if (op->data.label_name == NULL) {
-                sprintf(asm_buffer, "NULL_LABEL_ERROR");
-            } else {
-                sprintf(asm_buffer, "%s", op->data.label_name);
-            }
+            if (op->data.label_name == NULL) return "NULL_LABEL_ERROR";
+            snprintf(asm_buffer, sizeof(asm_buffer), "%s", op->data.label_name);
             break;
-
         default:
-            sprintf(asm_buffer, "INVALID_OPERAND");
-            break;
+            return "INVALID_OPERAND";
     }
     return asm_buffer;
 }
 
-
-/**
- * @brief gera o prólogo da função (cria o stack frame).
- * @details todo início de função em assembly deve configurar sua pilha.
- */
-static void asm_gen_prologue() {
-    asm_instr("pushq %%rbp");           //salva o ponteiro base da função anterior
-    asm_instr("movq %%rsp, %%rbp");    //define o ponteiro base desta função
-    //aqui alocamos espaço na pilha para todas as variáveis locais e temporários.
-    //uma implementação otimizada calcularia o tamanho exato necessário.
-    //para nosso compilador didático, alocamos um espaço fixo de 256 bytes.
-    asm_instr("subq $256, %%rsp");
+/** @brief gera o prólogo usando o tamanho calculado para a função. */
+static void asm_gen_prologue(int frame_size) {
+    asm_instr("pushq %%rbp");
+    asm_instr("movq %%rsp, %%rbp");
+    //o tamanho inclui variáveis, temporários e alinhamento de 16 bytes
+    if (frame_size > 0) asm_instr("subq $%d, %%rsp", frame_size);
 }
 
-/**
- * @brief gera o epílogo da função (destroi o stack frame e retorna).
- * @details todo fim de função em assembly deve limpar a pilha e retornar.
- */
-static void asm_gen_epilogue() {
-    asm_instr("movq %%rbp, %%rsp");    //restaura o ponteiro da pilha (libera espaço local)
-    asm_instr("popq %%rbp");           //restaura o ponteiro base da função anterior
-    asm_instr("ret");                  //retorna da função
+/** @brief restaura o frame e retorna à função chamadora. */
+static void asm_gen_epilogue(void) {
+    asm_instr("movq %%rbp, %%rsp");
+    asm_instr("popq %%rbp");
+    asm_instr("ret");
+}
+
+/** @brief escreve um literal usando escapes válidos para o montador. */
+static void emitir_string_assembly(const char* label, const char* conteudo) {
+    fprintf(outfile, "%s: .string \"", label);
+    for (const unsigned char* p = (const unsigned char*)conteudo; *p != '\0'; p++) {
+        switch (*p) {
+            case '\\': fputs("\\\\", outfile); break;
+            case '"': fputs("\\\"", outfile); break;
+            case '\n': fputs("\\n", outfile); break;
+            case '\t': fputs("\\t", outfile); break;
+            default:
+                if (isprint(*p)) fputc(*p, outfile);
+                else fprintf(outfile, "\\%03o", *p);
+                break;
+        }
+    }
+    fputs("\"\n", outfile);
+}
+
+/** @brief emite uma comparação que produz zero ou um. */
+static void emitir_comparacao(IROpcode opcode, const IR_Instruction* instr) {
+    asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
+    asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
+    asm_instr("cmpl %%r10d, %%eax");
+    asm_instr("movl $0, %%eax");
+    if (opcode == IR_EQ) asm_instr("sete %%al");
+    if (opcode == IR_NEQ) asm_instr("setne %%al");
+    if (opcode == IR_LT) asm_instr("setl %%al");
+    if (opcode == IR_LEQ) asm_instr("setle %%al");
+    if (opcode == IR_GT) asm_instr("setg %%al");
+    if (opcode == IR_GEQ) asm_instr("setge %%al");
+    asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+}
+
+/** @brief emite uma chamada interna com argumentos passados pela pilha. */
+static int emitir_chamada(const IR_Instruction* instr) {
+    if (instr->arg2 == NULL || instr->arg2->type != OPERAND_CONST ||
+        instr->arg2->data.const_val != param_buffer_count) {
+        fprintf(stderr, "Erro: Sequencia de parametros inconsistente na IR.\n");
+        return -1;
+    }
+
+    //o padding precede os argumentos e não altera seus offsets no destino
+    int padding = param_buffer_count % 2 != 0 ? 8 : 0;
+    if (padding != 0) asm_instr("subq $8, %%rsp");
+    for (int i = param_buffer_count - 1; i >= 0; i--) {
+        asm_instr("movl %s, %%eax", get_operand_asm(param_buffer[i]));
+        asm_instr("pushq %%rax");
+    }
+    asm_instr("call %s", get_operand_asm(instr->arg1));
+
+    int bytes = param_buffer_count * 8 + padding;
+    if (bytes > 0) asm_instr("addq $%d, %%rsp", bytes);
+    param_buffer_count = 0;
+
+    if (instr->result != NULL) {
+        asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+    }
+    return 0;
 }
 
 //================================================================================
 // FUNÇÃO PRINCIPAL DE GERAÇÃO
 //================================================================================
 
-/**
- * @brief função principal que gera o arquivo de assembly a partir da ir.
- * @details percorre a lista encadeada de ir, traduzindo cada instrução
- * (opcode) para sua sequência correspondente de assembly x86-64 at&t.
- * @param ir_head o ponteiro para a primeira instrução da lista de ir.
- * @param pilha a pilha de tabelas de símbolos (para consultar offsets).
- * @param nome_arquivo_saida o nome do arquivo .s onde o assembly será escrito.
- * @return 0 em caso de sucesso, -1 em caso de erro (ex: falha ao abrir arquivo).
- */
-int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha, const char* nome_arquivo_saida) {
+/** @brief gera o arquivo assembly correspondente à lista de ir. */
+int gerar_assembly(IR_Instruction* ir_head, PilhaTabelasSimbolos* pilha,
+                   const char* nome_arquivo_saida) {
     outfile = fopen(nome_arquivo_saida, "w");
     if (outfile == NULL) {
-        printf("Erro: Nao foi possivel criar o arquivo de saida assembly '%s'\n", nome_arquivo_saida);
+        fprintf(stderr, "Erro: Nao foi possivel criar o arquivo de saida assembly '%s'\n",
+                nome_arquivo_saida);
         return -1;
     }
+    param_buffer_count = 0;
 
-    //define a seção de dados (somente leitura)
     asm_print(".section .rodata");
-    
-    //define as strings de formato que o printf usará.
-    //usamos '%%' para "escapar" o % para a função 'asm_print' (vfprintf).
     asm_print(".L.str.int: .string \"%%d\\n\"");
     asm_print(".L.str.char: .string \"%%c\\n\"");
     asm_print(".L.str.str: .string \"%%s\\n\"");
 
-    //agora, fazemos uma "pré-varredura" na ir para encontrar
-    //todos os literais de string (ex: print("ola")) e defini-los.
-    IR_Instruction* instr_scan = ir_head;
-    while (instr_scan != NULL) {
-        // Verifica se é PRINT ou STRCPY (pois ambos usam literais)
-        if ((instr_scan->opcode == IR_PRINT_STRING || instr_scan->opcode == IR_STRCPY) && 
-            instr_scan->arg1 != NULL && 
-            instr_scan->arg1->type == OPERAND_STRING_LBL) 
-        {
-            const char* label_name = instr_scan->arg1->data.label_name;
-            const char* string_val = instr_scan->arg1->string_content;
-
-            if (label_name != NULL && string_val != NULL) {
-                asm_print("%s: .string \"%s\"", label_name, string_val);
-            }
+    for (IR_Instruction* instr = ir_head; instr != NULL; instr = instr->next) {
+        if ((instr->opcode == IR_PRINT_STRING || instr->opcode == IR_STRCPY) &&
+            instr->arg1 != NULL && instr->arg1->type == OPERAND_STRING_LBL &&
+            instr->arg1->data.label_name != NULL && instr->arg1->string_content != NULL) {
+            emitir_string_assembly(instr->arg1->data.label_name, instr->arg1->string_content);
         }
-        instr_scan = instr_scan->next;
     }
-    
-    //linha em branco para formatação
+
     asm_print("");
-    
-    asm_print(".text"); //volta para a seção de código
-    
+    asm_print(".text");
 
-    IR_Instruction* instr = ir_head;
-    while (instr != NULL) {
-        //traduz instrução por instrução
+    for (IR_Instruction* instr = ir_head; instr != NULL; instr = instr->next) {
         switch (instr->opcode) {
-            
-            /**
-             * @brief traduz a instrução ir_label.
-             * @detalhes labels de função (ex: main) recebem diretivas .globl
-             * e o prólogo da função. labels de desvio (ex: l0) são apenas impressos.
-             */
-
-            case IR_LABEL: { //adiciona chaves para criar um novo escopo
-                //passo 1: busca o símbolo na tabela
-                Simbolo* s = buscar_simbolo_em_todos_escopos(pilha, instr->result->data.label_name);
-                
-                //passo 2: verifica se o símbolo existe e se é uma função
-                if (s != NULL && s->is_function) {
-                    //é um label de função (main, soma, etc.)
-                    asm_print(".globl %s", s->nome);
-                    asm_print("%s:", s->nome);
-                    asm_gen_prologue();
+            case IR_LABEL: {
+                Simbolo* simbolo = buscar_simbolo_em_todos_escopos(
+                    pilha, instr->result->data.label_name);
+                if (simbolo != NULL && simbolo->is_function) {
+                    asm_print(".globl %s", simbolo->nome);
+                    asm_print("%s:", simbolo->nome);
+                    asm_gen_prologue(simbolo->frame_size);
                 } else {
-                    //é um label de desvio (l0, l1, etc.)
                     asm_print("%s:", get_operand_asm(instr->result));
                 }
                 break;
-            } //fecha o escopo do case
-            
-            /**
-             * @brief traduz a instrução ir_assign (atribuição).
-             * @detalhes traduz `result := arg1` (ex: x := t0).
-             * usa %eax como registrador intermediário.
-             */
+            }
+
             case IR_ASSIGN:
-                //passo 1: carrega a fonte (arg1) para o registrador %eax
                 asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
-                //passo 2: armazena o valor do registrador no destino (result)
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
-            
-            // --- INÍCIO DA REESTRUTURAÇÃO LÓGICA ---
 
-            //grupo 1: aritmética simples (add, sub, mul)
             case IR_ADD:
             case IR_SUB:
             case IR_MUL:
-                //passo 1: carrega arg1 em %eax
                 asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
-                //passo 2: carrega arg2 em %ebx
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                
-                //passo 3: opera
-                if(instr->opcode == IR_ADD) asm_instr("addl %%ebx, %%eax"); //eax = eax + ebx
-                if(instr->opcode == IR_SUB) asm_instr("subl %%ebx, %%eax"); //eax = eax - ebx
-                if(instr->opcode == IR_MUL) asm_instr("imull %%ebx, %%eax"); //eax = eax * ebx
-
-                //passo 4: armazena o resultado (%eax) no destino (result)
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
+                if (instr->opcode == IR_ADD) asm_instr("addl %%r10d, %%eax");
+                if (instr->opcode == IR_SUB) asm_instr("subl %%r10d, %%eax");
+                if (instr->opcode == IR_MUL) asm_instr("imull %%r10d, %%eax");
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
 
-            //grupo 2: divisão e módulo (CORRIGIDO PARA SUPORTAR CONSTANTES)
             case IR_DIV:
             case IR_MOD:
-                //passo 1: carrega o dividendo (arg1) em %eax
                 asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
-                
-                //passo 2: estende o sinal de %eax para %edx (necessário para idivl)
                 asm_instr("cdq");
-                
-                //passo 3: Carrega o divisor em %ecx
-                //CORREÇÃO: idivl não aceita imediato ($10). Movemos para reg primeiro.
-                asm_instr("movl %s, %%ecx", get_operand_asm(instr->arg2));
-                asm_instr("idivl %%ecx");
-                
-                //passo 4: armazena o resultado
-                if (instr->opcode == IR_DIV) {
-                    //o quociente está em %eax
-                    asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
-                } else {
-                    //o resto (módulo) está em %edx
-                    asm_instr("movl %%edx, %s", get_operand_asm(instr->result));
-                }
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
+                asm_instr("idivl %%r10d");
+                asm_instr("movl %s, %s",
+                          instr->opcode == IR_DIV ? "%eax" : "%edx",
+                          get_operand_asm(instr->result));
                 break;
 
-            //grupo 3: comparações (resultam em 0 ou 1)
             case IR_EQ:
             case IR_NEQ:
             case IR_LT:
             case IR_LEQ:
             case IR_GT:
             case IR_GEQ:
-                //passo 1: carrega arg1 em %eax
+                emitir_comparacao(instr->opcode, instr);
+                break;
+
+            case IR_NEG:
                 asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
-                //passo 2: carrega arg2 em %ebx
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                //passo 3: compara %eax com %ebx (cmpl fonte, destino)
-                asm_instr("cmpl %%ebx, %%eax");
-                //passo 4: zera %eax (prepara para resultado falso)
-                asm_instr("movl $0, %%eax");
-                
-                //passo 5: define o byte %al como 1 se a condição for verdadeira
-                //o 'l' em setl/sete refere-se ao registrador de 8 bits %al
-                if(instr->opcode == IR_EQ)  asm_instr("sete %%al"); //set if equal
-                if(instr->opcode == IR_NEQ) asm_instr("setne %%al"); //set if not equal
-                if(instr->opcode == IR_LT)  asm_instr("setl %%al"); //set if less
-                if(instr->opcode == IR_LEQ) asm_instr("setle %%al"); //set if less or equal
-                if(instr->opcode == IR_GT)  asm_instr("setg %%al"); //set if greater
-                if(instr->opcode == IR_GEQ) asm_instr("setge %%al"); //set if greater or equal
-                
-                //passo 6: armazena o resultado (0 ou 1) no destino
+                asm_instr("negl %%eax");
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
 
-            //grupo 4: lógica booleana (and, or)
-            case IR_AND:
-            case IR_OR:
-                //lógica booleana (não bitwise)
-                //result = (arg1 != 0) && (arg2 != 0)
-                
-                //passo 1: carrega arg1 em %eax e "booleaniza" (0 ou 1)
+            case IR_NOT:
                 asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
                 asm_instr("cmpl $0, %%eax");
-                asm_instr("setne %%al"); //al = (arg1 != 0)
-                
-                //passo 2: carrega arg2 em %ebx e "booleaniza" (0 ou 1)
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                asm_instr("cmpl $0, %%ebx");
-                asm_instr("setne %%bl"); //bl = (arg2 != 0)
-                
-                //passo 3: opera os bytes (al e bl)
-                if(instr->opcode == IR_AND) asm_instr("andb %%bl, %%al"); //al = al & bl
-                if(instr->opcode == IR_OR)  asm_instr("orb %%bl, %%al");  //al = al | bl
-                
-                //passo 4: estende o byte (%al) de volta para 32 bits (%eax)
-                asm_instr("movzbl %%al, %%eax");
-                
-                //passo 5: armazena o resultado (0 ou 1)
+                asm_instr("movl $0, %%eax");
+                asm_instr("sete %%al");
                 asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
                 break;
 
-            // --- FIM DA REESTRUTURAÇÃO LÓGICA ---
+            case IR_AND:
+            case IR_OR:
+                //mantido para ir importada; a geração atual usa curto-circuito
+                asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
+                asm_instr("cmpl $0, %%eax");
+                asm_instr("setne %%al");
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
+                asm_instr("cmpl $0, %%r10d");
+                asm_instr("setne %%r10b");
+                if (instr->opcode == IR_AND) asm_instr("andb %%r10b, %%al");
+                else asm_instr("orb %%r10b, %%al");
+                asm_instr("movzbl %%al, %%eax");
+                asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+                break;
 
-            /**
-             * @brief traduz a instrução ir_if_false (desvio condicional).
-             * @detalhes traduz `if_false arg1 goto result` (ex: if_false t0 goto l0).
-             */
             case IR_IF_FALSE:
-                //passo 1: compara o valor da condição (arg1) com 0
-                asm_instr("cmpl $0, %s", get_operand_asm(instr->arg1));
-                //passo 2: pula se for igual a 0 (je = jump if equal)
+                asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
+                asm_instr("cmpl $0, %%eax");
                 asm_instr("je %s", get_operand_asm(instr->result));
                 break;
 
-            /**
-             * @brief traduz a instrução ir_goto (desvio incondicional).
-             * @detalhes traduz `goto result` (ex: goto l1).
-             */
             case IR_GOTO:
                 asm_instr("jmp %s", get_operand_asm(instr->result));
                 break;
-            
-            /**
-             * @brief traduz a instrução ir_param (passagem de parâmetro).
-             * @detalhes acumula parâmetros em um buffer para empilhar na ordem
-             * reversa durante o ir_call.
-             */
+
             case IR_PARAM:
-                //acumula o parâmetro no buffer
-                if (param_buffer_count < 10) {
-                    param_buffer[param_buffer_count] = instr->arg1;
+                if (param_buffer_count >= MAX_PARAMETROS) {
+                    fprintf(stderr, "Erro: Limite de parametros excedido no backend.\n");
+                    fclose(outfile);
+                    outfile = NULL;
+                    return -1;
                 }
-                param_buffer_count++;
+                param_buffer[param_buffer_count++] = instr->arg1;
                 break;
-                
-            /**
-             * @brief traduz a instrução ir_call (chamada de função).
-             * @detalhes empilha os parâmetros acumulados na ordem reversa,
-             * chama a função, limpa a pilha e salva o retorno.
-             */
+
             case IR_CALL:
-                //passo 1: empilha os parâmetros na ordem reversa (da direita para a esquerda)
-                for (int i = param_buffer_count - 1; i >= 0; i--) {
-                    asm_instr("movl %s, %%eax", get_operand_asm(param_buffer[i]));
-                    asm_instr("pushq %%rax");
-                }
-                
-                //passo 2: chama a função (o label está em arg1)
-                asm_instr("call %s", get_operand_asm(instr->arg1));
-                
-                //passo 3: limpa os parâmetros da pilha
-                if (param_buffer_count > 0) {
-                    asm_instr("addq $%d, %%rsp", param_buffer_count * 8);
-                }
-                
-                //passo 4: reseta os contadores de parâmetro
-                param_buffer_count = 0;
-                param_count = 0; //(seu contador antigo, resetando por segurança)
-                
-                //passo 5: armazena o valor de retorno (que está em %eax) no destino
-                if (instr->result) {
-                    asm_instr("movl %%eax, %s", get_operand_asm(instr->result));
+                if (emitir_chamada(instr) != 0) {
+                    fclose(outfile);
+                    outfile = NULL;
+                    return -1;
                 }
                 break;
 
-            // --- INSERÇÃO DOS PRINTS ---
-            
-            case IR_PRINT_INT: {
+            case IR_PRINT_INT:
                 asm_instr("leaq .L.str.int(%%rip), %%rdi");
                 asm_instr("movl %s, %%esi", get_operand_asm(instr->arg1));
-                asm_instr("xorl %%eax, %%eax"); // %rax = 0 para printf
-                asm_instr("subq $8, %%rsp");    // alinha pilha 16 bytes
+                asm_instr("xorl %%eax, %%eax");
                 asm_instr("call printf");
-                asm_instr("addq $8, %%rsp");    // restaura pilha
                 break;
-            }
 
-            case IR_PRINT_CHAR: {
+            case IR_PRINT_CHAR:
                 asm_instr("leaq .L.str.char(%%rip), %%rdi");
                 asm_instr("movl %s, %%esi", get_operand_asm(instr->arg1));
                 asm_instr("xorl %%eax, %%eax");
-                asm_instr("subq $8, %%rsp");
                 asm_instr("call printf");
-                asm_instr("addq $8, %%rsp");
                 break;
-            }
 
-            case IR_PRINT_STRING: {
+            case IR_PRINT_STRING:
                 asm_instr("leaq .L.str.str(%%rip), %%rdi");
                 if (instr->arg1->type == OPERAND_SYMBOL) {
-                     asm_instr("leaq %s, %%rsi", get_operand_asm(instr->arg1));
+                    asm_instr("leaq %s, %%rsi", get_operand_asm(instr->arg1));
                 } else {
-                     asm_instr("leaq %s(%%rip), %%rsi", get_operand_asm(instr->arg1));
+                    asm_instr("leaq %s(%%rip), %%rsi", get_operand_asm(instr->arg1));
                 }
                 asm_instr("xorl %%eax, %%eax");
-                asm_instr("subq $8, %%rsp");
                 asm_instr("call printf");
-                asm_instr("addq $8, %%rsp");
                 break;
-            }
 
-            // --- IMPLEMENTAÇÃO DO STRCPY (NOVA INSTRUÇÃO) ---
-            case IR_STRCPY: {
+            case IR_STRCPY:
                 asm_instr("leaq %s, %%rdi", get_operand_asm(instr->result));
                 asm_instr("leaq %s(%%rip), %%rsi", get_operand_asm(instr->arg1));
                 asm_instr("call strcpy");
                 break;
-            }
-            // ------------------------------------------------
 
-            /**
-             * @brief traduz a instrução ir_return.
-             * @detalhes traduz `return arg1` (ex: return z).
-             * o valor de retorno é movido para %eax e o epílogo é gerado.
-             */
             case IR_RETURN:
-                if(instr->arg1) {
+                if (instr->arg1 != NULL) {
                     asm_instr("movl %s, %%eax", get_operand_asm(instr->arg1));
                 }
                 asm_gen_epilogue();
                 break;
 
-            /**
-             * @brief traduz a instrução ir_load (leitura de array de inteiros).
-             * @detalhes t0 = v[i] (escala 4 bytes)
-             */
             case IR_LOAD:
                 asm_instr("leaq %s, %%rax", get_operand_asm(instr->arg1));
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                asm_instr("movl (%%rax, %%rbx, 4), %%ecx");
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
+                asm_instr("movl (%%rax, %%r10, 4), %%ecx");
                 asm_instr("movl %%ecx, %s", get_operand_asm(instr->result));
                 break;
 
-            // --- NOVO: LEITURA DE BYTE (CHAR) ---
-            case IR_LOAD_BYTE: 
+            case IR_LOAD_BYTE:
                 asm_instr("leaq %s, %%rax", get_operand_asm(instr->arg1));
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
-                
-                // movzbl: move byte com extensão de zero
-                // Escala 1 para chars
-                asm_instr("movzbl (%%rax, %%rbx, 1), %%ecx");
-                
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
+                asm_instr("movzbl (%%rax, %%r10, 1), %%ecx");
                 asm_instr("movl %%ecx, %s", get_operand_asm(instr->result));
                 break;
-            // ------------------------------------
 
-            /**
-             * @brief traduz a instrução ir_store (escrita em array de inteiros).
-             * @detalhes v[i] = t0 (escala 4 bytes)
-             */
             case IR_STORE:
                 asm_instr("leaq %s, %%rax", get_operand_asm(instr->result));
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
                 asm_instr("movl %s, %%ecx", get_operand_asm(instr->arg1));
-                asm_instr("movl %%ecx, (%%rax, %%rbx, 4)");
+                asm_instr("movl %%ecx, (%%rax, %%r10, 4)");
                 break;
 
-            // --- NOVO: ESCRITA DE BYTE (CHAR) ---
             case IR_STORE_BYTE:
                 asm_instr("leaq %s, %%rax", get_operand_asm(instr->result));
-                asm_instr("movl %s, %%ebx", get_operand_asm(instr->arg2));
+                asm_instr("movl %s, %%r10d", get_operand_asm(instr->arg2));
                 asm_instr("movl %s, %%ecx", get_operand_asm(instr->arg1));
-                
-                // movb: escreve apenas o byte inferior (%cl)
-                // Escala 1
-                asm_instr("movb %%cl, (%%rax, %%rbx, 1)");
+                asm_instr("movb %%cl, (%%rax, %%r10, 1)");
                 break;
-            // ------------------------------------
 
             default:
-                asm_instr("# opcode da ir nao implementado: %d", instr->opcode);
-                break;
+                fprintf(stderr, "Erro: Opcode da IR nao implementado: %d\n", instr->opcode);
+                fclose(outfile);
+                outfile = NULL;
+                return -1;
         }
-        instr = instr->next;
     }
 
     fclose(outfile);
+    outfile = NULL;
     return 0;
 }

@@ -1,0 +1,6 @@
+int main() {
+    char texto[16];
+    texto = "linha\n\"ok\"";
+    print(texto);
+    return 0;
+}

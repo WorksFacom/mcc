@@ -1,0 +1,5 @@
+int main() {
+    char texto[4];
+    texto = "maior";
+    return 0;
+}
